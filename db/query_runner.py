@@ -5,18 +5,13 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 import os
-import re
 import logging
+from utils.validator import validate_sql
 
 logger = logging.getLogger(__name__)
 
 
 class QueryRunner:
-
-    FORBIDDEN_KEYWORDS = [
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
-        "TRUNCATE", "CREATE", "GRANT", "REVOKE", "EXECUTE"
-    ]
 
     def __init__(self, dsn: str = None, min_conn: int = 1, max_conn: int = 5):
         """
@@ -54,17 +49,8 @@ class QueryRunner:
     def _release_conn(self, conn):
         self._pool.putconn(conn)
 
-    def _is_safe_query(self, query: str) -> tuple[bool, str]:
-        clean = " ".join(query.split()).upper()
-        for keyword in self.FORBIDDEN_KEYWORDS:
-            if re.search(rf'\b{keyword}\b', clean):
-                return False, f"Forbidden operation: {keyword}"
-        if not (clean.startswith("SELECT") or clean.startswith("WITH")):
-            return False, "Query must start with SELECT or WITH"
-        return True, ""
-
-    def execute(self, query: str, params: tuple = None) -> list[dict]:
-        is_safe, reason = self._is_safe_query(query)
+    def execute(self, query: str, params=None) -> list[dict]:
+        is_safe, reason = validate_sql(query)
         if not is_safe:
             raise PermissionError(f"Query blocked: {reason}")
 
