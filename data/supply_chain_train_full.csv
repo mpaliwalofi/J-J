@@ -1,0 +1,351 @@
+text,label
+What is the OTIF rate this week?,kpi_lookup
+Show me on-time delivery percentage for today,kpi_lookup
+What is the current failed delivery rate?,kpi_lookup
+How many deliveries were completed yesterday?,kpi_lookup
+What is the SLA breach count this month?,kpi_lookup
+Show me the return rate for last week,kpi_lookup
+What is the average number of delivery attempts per order?,kpi_lookup
+How many orders were delivered on first attempt today?,kpi_lookup
+What is the delivery cost per shipment this quarter?,kpi_lookup
+Show me total shipments dispatched this week,kpi_lookup
+What is the on-time delivery rate for the North region?,kpi_lookup
+How many SLA breaches happened last month?,kpi_lookup
+What is the last mile cost per km today?,kpi_lookup
+Show me failed deliveries for this week,kpi_lookup
+What is the OTIF for courier partner A?,kpi_lookup
+How many deliveries are pending right now?,kpi_lookup
+What is the average delivery time this month?,kpi_lookup
+Show me total orders delivered last quarter,kpi_lookup
+What is the first attempt delivery success rate?,kpi_lookup
+How many returns were raised this week?,kpi_lookup
+What is current warehouse utilisation?,kpi_lookup
+Show me fill rate for warehouse Mumbai,kpi_lookup
+What is the dispatch accuracy this week?,kpi_lookup
+How many orders are sitting in the warehouse right now?,kpi_lookup
+What is the average dwell time for inbound shipments?,kpi_lookup
+Show me pick accuracy for last month,kpi_lookup
+What is the dock utilisation percentage today?,kpi_lookup
+How many inbound shipments arrived this week?,kpi_lookup
+What is the outbound dispatch count for today?,kpi_lookup
+Show me warehouse throughput for last quarter,kpi_lookup
+What is the inbound vs outbound ratio this month?,kpi_lookup
+How many shipments are pending putaway?,kpi_lookup
+What is the average time from dock to shelf?,kpi_lookup
+Show me warehouse capacity used today,kpi_lookup
+What is the order processing time this week?,kpi_lookup
+What is the current load factor for today's shipments?,kpi_lookup
+Show me rejection rate for load consolidation this week,kpi_lookup
+What is the consolidation efficiency this month?,kpi_lookup
+How many loads were rejected today?,kpi_lookup
+What is the average transit time for consolidated loads?,kpi_lookup
+Show me cost per kg for this week,kpi_lookup
+What is truck utilisation percentage today?,kpi_lookup
+How many routes deviated from plan this week?,kpi_lookup
+What is the route adherence rate for last month?,kpi_lookup
+Show me total loads consolidated this quarter,kpi_lookup
+What is the average load weight this week?,kpi_lookup
+How many partial loads were dispatched today?,kpi_lookup
+What is the fill percentage per truck this month?,kpi_lookup
+Show me consolidation cost savings for last quarter,kpi_lookup
+What is the average number of stops per consolidated route?,kpi_lookup
+Show me OTIF trend over the last 30 days,trend_analysis
+How has the on-time delivery rate changed week by week this quarter?,trend_analysis
+Plot failed deliveries day by day for the past 2 weeks,trend_analysis
+How has SLA breach count trended over the last 3 months?,trend_analysis
+Show me daily delivery attempt rate for this month,trend_analysis
+How did return rate change month by month this year?,trend_analysis
+Show last mile cost per shipment trend for last 6 months,trend_analysis
+How has first attempt success rate trended this quarter?,trend_analysis
+Plot OTIF weekly for the past year,trend_analysis
+Show me delivery volume trend over the last 90 days,trend_analysis
+How has average delivery time changed over the last 30 days?,trend_analysis
+Show courier partner performance trend for the last 6 months,trend_analysis
+How did SLA breaches trend during festive season last year?,trend_analysis
+Plot daily failed deliveries for the North region last month,trend_analysis
+How has last mile cost trended year over year?,trend_analysis
+Show me warehouse utilisation trend for the past 6 months,trend_analysis
+How has fill rate changed week by week this quarter?,trend_analysis
+Plot dispatch accuracy month by month for this year,trend_analysis
+How did dwell time trend over the last 90 days?,trend_analysis
+Show inbound shipment volume trend for last 3 months,trend_analysis
+How has pick accuracy changed over the last 6 months?,trend_analysis
+Plot dock utilisation daily for the past month,trend_analysis
+Show warehouse throughput trend for the last year,trend_analysis
+How did processing time trend week by week this quarter?,trend_analysis
+Show me outbound volume trend for last 6 months,trend_analysis
+How has load factor trended over the last 3 months?,trend_analysis
+Show rejection rate trend week by week for this quarter,trend_analysis
+How did consolidation efficiency change month by month this year?,trend_analysis
+Plot transit time trend for consolidated loads over last 6 months,trend_analysis
+How has cost per kg changed over the last year?,trend_analysis
+Show truck utilisation trend for the past 3 months,trend_analysis
+How did route adherence rate trend over the last 90 days?,trend_analysis
+Plot load consolidation volume month by month for this year,trend_analysis
+How has partial load percentage trended this quarter?,trend_analysis
+Show me consolidation cost savings trend for the last 6 months,trend_analysis
+How did OTIF change during the last holiday season?,trend_analysis
+Show me weekly SLA breach trend for the East region,trend_analysis
+How has return rate trended for non-metro areas this year?,trend_analysis
+Plot daily shipment volume for the past 60 days,trend_analysis
+How has last mile delivery success rate changed over last 12 months?,trend_analysis
+Show dock utilisation trend for warehouse Delhi over last quarter,trend_analysis
+How did pick accuracy trend for warehouse Chennai last 6 months?,trend_analysis
+Plot inbound vs outbound ratio trend for the past year,trend_analysis
+How has average dwell time changed in the last 6 months?,trend_analysis
+Show consolidation efficiency trend by corridor for last 3 months,trend_analysis
+How did truck utilisation trend for South corridor last quarter?,trend_analysis
+Plot cost per kg trend separately for FTL and LTL loads,trend_analysis
+How has route adherence trended for the East corridor this year?,trend_analysis
+Show partial load trend week by week for the past 3 months,trend_analysis
+How did load rejection rate trend by warehouse over last 6 months?,trend_analysis
+Compare OTIF between North and South regions this month,comparison
+Which courier partner has the best on-time delivery rate?,comparison
+How does last mile performance compare across regions this quarter?,comparison
+Compare failed delivery rate between courier A and courier B,comparison
+Which region has the highest SLA breach count this month?,comparison
+How does return rate compare between metro and non-metro areas?,comparison
+Compare delivery cost per shipment across all courier partners,comparison
+Which city has the best first attempt delivery success rate?,comparison
+Compare OTIF this month vs last month,comparison
+How does delivery performance compare between weekdays and weekends?,comparison
+Which courier partner has the lowest average delivery time?,comparison
+Compare SLA breaches across all regions for this quarter,comparison
+How does North region OTIF compare to company average?,comparison
+Compare last mile cost between Q1 and Q2 this year,comparison
+Which route has the most failed deliveries this month?,comparison
+Compare warehouse utilisation between Mumbai and Delhi,comparison
+Which warehouse has the best dispatch accuracy this quarter?,comparison
+How does fill rate compare across all warehouses?,comparison
+Compare dwell time between inbound and outbound shipments,comparison
+Which warehouse has the lowest pick accuracy this month?,comparison
+Compare dock utilisation across all warehouse locations,comparison
+How does warehouse A throughput compare to warehouse B?,comparison
+Compare inbound shipment volumes across all warehouses this quarter,comparison
+Which warehouse has the highest order processing time?,comparison
+Compare dispatch accuracy between this month and last month,comparison
+Compare load factor between route A and route B,comparison
+Which consolidation route has the highest rejection rate?,comparison
+How does cost per kg compare across different load types?,comparison
+Compare truck utilisation between North and South corridors,comparison
+Which route has the best consolidation efficiency this month?,comparison
+Compare transit time for consolidated vs non-consolidated loads,comparison
+How does route adherence compare across all corridors this quarter?,comparison
+Which truck type has the best fill percentage?,comparison
+Compare consolidation cost this quarter vs last quarter,comparison
+Which carrier has the lowest cost per kg for load consolidation?,comparison
+How does OTIF for courier A compare to courier B this quarter?,comparison
+Compare SLA breach rate between metro and tier 2 cities,comparison
+Which region improved the most in OTIF over the last 3 months?,comparison
+How does pick accuracy compare between morning and evening shifts?,comparison
+Compare dock utilisation between warehouse Mumbai and warehouse Pune,comparison
+How does outbound volume compare across all warehouses this month?,comparison
+Which corridor has the lowest transit time for consolidated loads?,comparison
+Compare cost per kg between FTL and LTL loads this quarter?,comparison
+Which warehouse has improved the most in fill rate this year?,comparison
+Compare route adherence between contracted and spot carriers,comparison
+How does truck utilisation compare between Q1 and Q2 this year?,comparison
+Which region has the highest return rate this month?,comparison
+Compare first attempt delivery success across all courier partners,comparison
+How does SLA breach rate compare between peak and non-peak periods?,comparison
+Which consolidation route has the best load factor?,comparison
+Did OTIF drop suddenly this week?,anomaly_detection
+Was there a spike in failed deliveries yesterday?,anomaly_detection
+Did SLA breaches jump unexpectedly this month?,anomaly_detection
+Was there an unusual increase in return rate last week?,anomaly_detection
+Did delivery attempts per order spike recently?,anomaly_detection
+Was there a sudden drop in first attempt success rate?,anomaly_detection
+Did last mile cost spike abnormally this week?,anomaly_detection
+Was there anything unusual in North region deliveries yesterday?,anomaly_detection
+Did courier partner A performance drop suddenly?,anomaly_detection
+Was there a spike in delivery time for any region this week?,anomaly_detection
+Did any route show unusual SLA breach patterns this month?,anomaly_detection
+Was there an unexpected dip in total shipments dispatched?,anomaly_detection
+Did warehouse utilisation spike abnormally this week?,anomaly_detection
+Was there a sudden drop in fill rate for warehouse Mumbai?,anomaly_detection
+Did dispatch accuracy fall unexpectedly last week?,anomaly_detection
+Was there a spike in dwell time for any warehouse this month?,anomaly_detection
+Did inbound shipment volume drop suddenly this week?,anomaly_detection
+Was there anything unusual in dock utilisation yesterday?,anomaly_detection
+Did pick accuracy drop abnormally for any warehouse?,anomaly_detection
+Was there an unusual backlog buildup in the warehouse this week?,anomaly_detection
+Did load rejection rate spike unexpectedly this week?,anomaly_detection
+Was there a sudden drop in load factor for any route?,anomaly_detection
+Did consolidation efficiency fall abnormally this month?,anomaly_detection
+Was there a spike in transit time for consolidated loads recently?,anomaly_detection
+Did cost per kg increase abnormally this week?,anomaly_detection
+Was there an unexpected drop in truck utilisation?,anomaly_detection
+Did route adherence fall suddenly for any corridor?,anomaly_detection
+Was there an unusual number of partial loads dispatched recently?,anomaly_detection
+Did any consolidation route show abnormal rejection patterns?,anomaly_detection
+Was there a spike in consolidation cost this week?,anomaly_detection
+Did OTIF fall below threshold for any region this month?,anomaly_detection
+Was there an unexpected surge in return requests last week?,anomaly_detection
+Did any courier partner show a sudden drop in performance?,anomaly_detection
+Was there a spike in SLA breaches for tier 2 cities this week?,anomaly_detection
+Did failed delivery rate cross the alert threshold yesterday?,anomaly_detection
+Was there unusual inbound shipment volume at warehouse Delhi?,anomaly_detection
+Did order processing time spike for any warehouse this week?,anomaly_detection
+Was there an abnormal drop in outbound dispatch today?,anomaly_detection
+Did pick accuracy fall below acceptable levels for any shift?,anomaly_detection
+Was there a sudden rise in dock wait times this week?,anomaly_detection
+Did load factor drop below threshold for any truck this week?,anomaly_detection
+Was there an unusual number of route deviations this month?,anomaly_detection
+Did any corridor show a spike in transit time recently?,anomaly_detection
+Was there an abnormal increase in partial loads for the North corridor?,anomaly_detection
+Did truck utilisation fall below threshold for any route today?,anomaly_detection
+Was there a spike in consolidation rejection rate this week?,anomaly_detection
+Did cost per kg exceed the alert limit for any route?,anomaly_detection
+Was there an abnormal drop in consolidation efficiency this month?,anomaly_detection
+Did any warehouse show a sudden capacity overflow this week?,anomaly_detection
+Was there an unexpected spike in last mile delivery cost yesterday?,anomaly_detection
+Why did OTIF drop last week?,root_cause
+What is causing the high SLA breach count in the North region?,root_cause
+Why are failed deliveries increasing this month?,root_cause
+What is the reason for the spike in delivery attempts per order?,root_cause
+Why is courier partner B underperforming on delivery time?,root_cause
+What caused the return rate to increase last week?,root_cause
+Why is last mile cost higher than usual this quarter?,root_cause
+What is driving the low first attempt success rate in South region?,root_cause
+Why did OTIF fall for metro deliveries this month?,root_cause
+What is causing high SLA breaches on weekends?,root_cause
+Why are deliveries taking longer than usual in the East region?,root_cause
+What caused the spike in failed deliveries yesterday?,root_cause
+Why is warehouse Mumbai showing low fill rate this month?,root_cause
+What is causing the high dwell time for inbound shipments?,root_cause
+Why did dispatch accuracy fall last week?,root_cause
+What is driving the low pick accuracy in warehouse Delhi?,root_cause
+Why is dock utilisation low for warehouse Chennai?,root_cause
+What caused the backlog in warehouse processing this week?,root_cause
+Why are inbound shipments taking longer to process?,root_cause
+What is causing high outbound dispatch delays?,root_cause
+Why did load rejection rate spike this week?,root_cause
+What is causing low load factor on North corridor routes?,root_cause
+Why is consolidation efficiency dropping this month?,root_cause
+What caused the increase in transit time for consolidated loads?,root_cause
+Why is cost per kg higher on South corridor routes?,root_cause
+What is driving low truck utilisation this quarter?,root_cause
+Why are so many routes deviating from plan this month?,root_cause
+What caused the high number of partial loads this week?,root_cause
+Why is route adherence low for the East corridor?,root_cause
+What is causing high consolidation costs this quarter?,root_cause
+Why did first attempt delivery success fall for non-metro areas?,root_cause
+What is behind the rising SLA breaches for tier 2 cities?,root_cause
+Why is warehouse Pune showing high order processing times?,root_cause
+What caused the dock utilisation to drop at warehouse Chennai?,root_cause
+Why did outbound dispatch volume fall unexpectedly last week?,root_cause
+What is driving the high return rate in the West region?,root_cause
+Why are courier partner delivery times inconsistent this month?,root_cause
+What caused the pick accuracy decline in the night shift?,root_cause
+Why is inbound throughput lower than expected at warehouse Delhi?,root_cause
+What is causing the rise in partial load dispatches this quarter?,root_cause
+Why did the rejection rate increase for the South corridor?,root_cause
+What caused the transit time spike for consolidated loads last week?,root_cause
+Why are trucks running below fill capacity on the East corridor?,root_cause
+What is driving the cost per kg increase for LTL loads?,root_cause
+Why did route adherence fall for contracted carriers this month?,root_cause
+What caused the backlog in load consolidation this week?,root_cause
+Why is truck turnaround time higher than usual at warehouse Mumbai?,root_cause
+What is causing the high number of load rejections at the origin point?,root_cause
+Why did OTIF fall below target for the festive season delivery window?,root_cause
+What is behind the sudden rise in delivery cost for the North region?,root_cause
+Predict OTIF for next month,forecast
+What will the failed delivery rate be next week?,forecast
+Forecast SLA breach count for next quarter,forecast
+Estimate on-time delivery rate for Q3,forecast
+What will last mile cost per shipment be next month?,forecast
+Predict return rate for next quarter,forecast
+Forecast delivery volume for next month based on current trend,forecast
+What will first attempt success rate be next week?,forecast
+Predict delivery time average for next quarter,forecast
+Estimate courier partner performance for next month,forecast
+What will OTIF look like for the festive season?,forecast
+Forecast last mile cost for next year,forecast
+Predict SLA breaches for next month,forecast
+What will failed deliveries look like next quarter?,forecast
+Estimate delivery attempt rate for next month,forecast
+Predict warehouse utilisation for next quarter,forecast
+What will fill rate be next month?,forecast
+Forecast dispatch accuracy for next quarter,forecast
+Estimate dwell time for next month based on current trend,forecast
+What will inbound shipment volume be next week?,forecast
+Predict warehouse throughput for next quarter,forecast
+Forecast dock utilisation for next month,forecast
+What will pick accuracy look like next quarter?,forecast
+Estimate outbound dispatch volume for next month,forecast
+Predict warehouse capacity needs for Q3,forecast
+Predict load factor for next month,forecast
+What will rejection rate be next quarter?,forecast
+Forecast consolidation efficiency for next month,forecast
+Estimate transit time for next quarter,forecast
+What will cost per kg be next month based on current trend?,forecast
+Forecast truck utilisation for next quarter,forecast
+Predict route adherence rate for next month,forecast
+What will consolidation volume look like next quarter?,forecast
+Estimate partial load percentage for next month,forecast
+Forecast consolidation cost savings for next quarter,forecast
+What will OTIF be for the North region next month?,forecast
+Estimate SLA breach count for the festive period,forecast
+Predict failed delivery rate for non-metro cities next quarter,forecast
+What will last mile delivery cost look like next year?,forecast
+Forecast return rate for tier 2 cities next month,forecast
+Predict warehouse fill rate for warehouse Mumbai next quarter,forecast
+What will dock utilisation be for warehouse Delhi next month?,forecast
+Estimate pick accuracy for the night shift next month,forecast
+Forecast inbound volume for warehouse Chennai next quarter,forecast
+What will order processing time be next month?,forecast
+Predict load rejection rate for the South corridor next quarter,forecast
+Forecast cost per kg for FTL loads next month,forecast
+What will truck utilisation look like for the East corridor next quarter?,forecast
+Estimate route adherence for contracted carriers next month,forecast
+Predict consolidation efficiency for the North corridor next quarter,forecast
+How many shipments are currently in transit?,operational_status
+Which routes are delayed right now?,operational_status
+How many deliveries are out for delivery today?,operational_status
+Which courier partners have active shipments right now?,operational_status
+How many orders are pending delivery today?,operational_status
+Which regions have active delivery operations right now?,operational_status
+How many shipments failed delivery and need rescheduling?,operational_status
+Which orders have breached SLA today?,operational_status
+How many returns are pending pickup right now?,operational_status
+What is the live delivery completion rate for today?,operational_status
+How many loads are currently in transit?,operational_status
+Which routes are active right now?,operational_status
+How many shipments are waiting at the warehouse for dispatch?,operational_status
+Which loads are pending consolidation right now?,operational_status
+How many trucks are currently on the road?,operational_status
+Which consolidation routes are delayed today?,operational_status
+How many loads are at the staging area right now?,operational_status
+Which orders are currently being loaded onto trucks?,operational_status
+How many trucks have completed their routes today?,operational_status
+What is the current live load factor for outgoing trucks?,operational_status
+How many orders are currently being processed in the warehouse?,operational_status
+Which docks are active right now?,operational_status
+How many shipments are in the putaway queue?,operational_status
+Which warehouse zones are at full capacity right now?,operational_status
+How many inbound shipments are waiting to be checked in?,operational_status
+Which warehouses are currently running at over 90 percent capacity?,operational_status
+How many trucks are waiting to be loaded right now?,operational_status
+Which courier partners are currently active in the East region?,operational_status
+How many orders are in the last mile delivery window right now?,operational_status
+Which consolidation batches are ready for dispatch today?,operational_status
+How many shipments have missed their delivery window today?,operational_status
+Which routes currently have the most active deliveries?,operational_status
+How many docks are currently occupied at warehouse Mumbai?,operational_status
+What percentage of today's orders are already delivered?,operational_status
+Which loads are currently being consolidated at the staging area?,operational_status
+How many trucks are delayed on their current routes right now?,operational_status
+Which warehouses currently have the most pending putaway?,operational_status
+How many shipments are in exception status right now?,operational_status
+Which courier partner has the most active deliveries at this moment?,operational_status
+How many orders need rescheduling due to failed delivery today?,operational_status
+Which corridors currently have the highest active load count?,operational_status
+How many loads are currently awaiting quality check before dispatch?,operational_status
+What is the real-time fill rate for trucks on the North corridor?,operational_status
+Which orders are currently out for second delivery attempt?,operational_status
+How many returns are in transit back to the warehouse right now?,operational_status
+Which warehouse zones are currently being replenished?,operational_status
+How many orders are in the packaging stage right now?,operational_status
+Which routes have trucks that are behind schedule today?,operational_status
+How many loads are pending driver assignment right now?,operational_status
+Which delivery clusters have the most pending orders at this hour?,operational_status
