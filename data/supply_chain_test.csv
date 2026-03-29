@@ -1,0 +1,41 @@
+text,label
+What is the OTIF rate for this month?,kpi_lookup
+How many failed deliveries happened today?,kpi_lookup
+What is the current SLA breach rate?,kpi_lookup
+Show me return rate for the North region,kpi_lookup
+What is cost per delivery this week?,kpi_lookup
+What is warehouse fill rate today?,kpi_lookup
+How many loads were consolidated this week?,kpi_lookup
+What is current truck utilisation?,kpi_lookup
+Show me route adherence for last week,kpi_lookup
+What is dock utilisation right now?,kpi_lookup
+How has OTIF trended over the last 3 months?,trend_analysis
+Show me weekly failed delivery trend this quarter,trend_analysis
+How did warehouse utilisation change month by month?,trend_analysis
+Plot cost per kg trend for the past 6 months,trend_analysis
+How has truck utilisation trended this year?,trend_analysis
+Which region has the best OTIF this quarter?,comparison
+Compare warehouse utilisation between Chennai and Pune,comparison
+How does cost per kg compare between North and South corridors?,comparison
+Which courier partner has the fewest SLA breaches?,comparison
+Compare dispatch accuracy this month vs last month,comparison
+Was there a sudden OTIF drop this week?,anomaly_detection
+Did fill rate spike abnormally for any warehouse?,anomaly_detection
+Was there an unusual rise in partial loads this month?,anomaly_detection
+Did any route show unexpected delays recently?,anomaly_detection
+Was there a cost per kg spike this week?,anomaly_detection
+Why is OTIF low in the South region?,root_cause
+What is causing the high dwell time in warehouse Pune?,root_cause
+Why did load rejection rate increase this week?,root_cause
+What is driving the SLA breach spike on weekends?,root_cause
+Why is truck utilisation low this quarter?,root_cause
+Predict OTIF for next quarter,forecast
+What will warehouse utilisation be next month?,forecast
+Forecast load rejection rate for next quarter,forecast
+Estimate cost per kg for next month,forecast
+What will SLA breaches look like next week?,forecast
+How many trucks are out for delivery right now?,operational_status
+Which warehouses are currently at full capacity?,operational_status
+How many shipments are pending consolidation today?,operational_status
+Which routes are active right now?,operational_status
+How many orders are waiting for rescheduling?,operational_status

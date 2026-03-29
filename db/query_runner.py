@@ -1,6 +1,3 @@
-# db/query_runner.py
-# Configured for Supabase PostgreSQL
-
 import psycopg2
 import psycopg2.extras
 import psycopg2.pool
@@ -10,19 +7,8 @@ from utils.validator import validate_sql
 
 logger = logging.getLogger(__name__)
 
-
 class QueryRunner:
-
     def __init__(self, dsn: str = None, min_conn: int = 1, max_conn: int = 5):
-        """
-        For Supabase, your DSN looks like:
-        postgresql://postgres:[YOUR-PASSWORD]@pfdkwwirzljwuurvqjfs.supabase.co:5432/postgres
-
-        Get it from:
-        Supabase Dashboard → your project → Connect button → Direct connection string
-        Copy it, replace [YOUR-PASSWORD] with your actual DB password.
-        Paste it in your .env as DATABASE_URL=...
-        """
         self.dsn = dsn or os.getenv("DATABASE_URL")
         if not self.dsn:
             raise ValueError(

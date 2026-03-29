@@ -26,6 +26,13 @@ Rules:
 - CRITICAL: Column names are case-sensitive in PostgreSQL. Always wrap EVERY column name in double quotes exactly as shown in the schema. Example: delivery_dim."Delivery_Date", sales_order_dim."Case ID"
 - Do not hallucinate tables or columns
 - When filtering by date, always double-quote the column: EXTRACT(YEAR FROM "Delivery_Date") not Delivery_Date
+- CRITICAL: Use aggregation (SUM, AVG, COUNT, MAX, MIN) when the question asks for a total, average, count, rate, or percentage — do NOT return raw rows. Examples:
+  - "total savings lost" → SELECT SUM("Savings Lost (2025 Projection)") AS total FROM kpi_tuned
+  - "average lead time" → SELECT AVG("Total Lead Time (Days)") AS avg_lead_time FROM kpi_tuned
+  - "how many deliveries" → SELECT COUNT(*) AS count FROM delivery_dim
+  - "delivery rate/percentage" → SELECT COUNT(*) FILTER (WHERE ...) * 100.0 / COUNT(*) AS rate FROM ...
+- Only return raw rows when the question asks to "show", "list", or "display" individual records
+- When aggregating a column that may be stored as text, always cast it: SUM(CAST("Column Name" AS numeric))
 """
 
 
