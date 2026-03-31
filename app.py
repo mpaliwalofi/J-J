@@ -128,33 +128,57 @@ def handle_query(query: str) -> dict:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def _run_one(query: str) -> None:
+    """Pre-check classifier, then run full pipeline and print result."""
+    try:
+        classifier.classify(query)
+    except ValueError as e:
+        print(f"\n{e}\n")
+        return
+    except Exception as e:
+        print(f"\nClassifier error: {e}\n")
+        return
+
+    result = handle_query(query)
+    print()
+    if result["success"]:
+        print(result["answer"])
+    else:
+        print(f"Error: {result['error']}")
+    print()
+
+
 if __name__ == "__main__":
-    test_queries = [
-        "What is the OTIF rate this week?",
-        "Show me failed deliveries trend over last 30 days",
-        "Compare warehouse utilisation between Mumbai and Delhi",
-        "Why did load rejection rate spike this week?",
-    ]
-
+    # One-shot mode: python app.py "What is OTIF this week?"
     if len(sys.argv) > 1:
-        test_queries = [" ".join(sys.argv[1:])]
+        _run_one(" ".join(sys.argv[1:]))
+        sys.exit(0)
 
-    import os
-    debug = os.getenv("DEBUG", "false").lower() == "true"
+    # Interactive mode
+    print("\nJ&J KPI Assistant  (type 'quit' or 'exit' to stop)\n")
+    try:
+        while True:
+            try:
+                query = input("You: ").strip()
+            except EOFError:
+                print("\nGoodbye.")
+                break
 
-    for q in test_queries:
-        print("\n" + "=" * 60)
-        print(f"Q: {q}")
-        out = handle_query(q)
-        print(f"A: {out['answer']}")
-        if out.get("sql"):
-            print(f"   SQL: {out['sql']}")
-        print(f"   Rows: {out['row_count']} | Success: {out['success']}")
-        if out.get("error"):
-            print(f"   Error: {out['error']}")
-        if debug and out.get("result"):
-            print(f"\n   --- RAW DB ROWS (before LLM) ---")
-            for row in out["result"][:10]:
-                print(f"   {row}")
-            if out["row_count"] > 10:
-                print(f"   ... and {out['row_count'] - 10} more rows")
+            if not query:
+                print("Please type a question.\n")
+                continue
+
+            if query.lower() in ("quit", "exit"):
+                print("Goodbye.")
+                break
+
+            _run_one(query)
+
+    except KeyboardInterrupt:
+        print("\nGoodbye.")
+
+
+
+
+    
+
