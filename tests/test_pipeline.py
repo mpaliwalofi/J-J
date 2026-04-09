@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # Patch DB + vector store at import time so app.py module-level
 # initialisations don't attempt a real Supabase connection.
 _mock_db = MagicMock()
-_mock_db.list_tables.return_value = ["kpi_tuned", "delivery_dim"]
+_mock_db.list_tables.return_value = ["Supply_Chain_KPI_Tuned", "Delivery_Dim"]
 _mock_db.get_schema.return_value = {}
 
 _mock_vs = MagicMock()

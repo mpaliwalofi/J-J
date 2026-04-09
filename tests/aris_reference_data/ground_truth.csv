@@ -1,0 +1,9 @@
+test_case_id,query,expected_value,tolerance,unit,source,expected_categories,expected_top_reason
+otif_2024,what is otif in 2024?,85.3,0.5,percentage,ARIS Dashboard > KPIs > OTIF > 2024,,
+warehouse_utilization_2024,what is warehouse utilization in 2024?,78.2,1.0,percentage,ARIS Dashboard > Warehouse > Utilization > 2024,,
+shipments_affected_total,give me number of shipment affected,5500,10,count,ARIS Dashboard > Shipments > Affected Count,,
+on_time_delivery_rate_2024,what is the on-time delivery rate in 2024?,82.7,0.5,percentage,ARIS Dashboard > Deliveries > On-Time Rate > 2024,,
+delivery_delays_reasons,give me reasons for delivery delays,,,categorical,ARIS Dashboard > Deliveries > Delay Reasons,"Carrier Issue|Weather Disruption|Traffic Congestion|Warehouse Delay|Route Disruption",Carrier Issue
+warehouse_utilization_mumbai_2024,what is warehouse utilization in mumbai in 2024?,82.5,1.0,percentage,ARIS Dashboard > Warehouse > Mumbai > 2024,,
+failed_deliveries_2024,how many failed deliveries in 2024?,156,5,count,ARIS Dashboard > Deliveries > Failed > 2024,,
+avg_delay_duration_2024,what is average delay duration in 2024?,2.8,0.2,days,ARIS Dashboard > Delays > Average Duration > 2024,,

@@ -17,3 +17,6 @@ anaconda_projects/
 .DS_Store
 Thumbs.db
 CLAUDE.md
+QUICK_START_VALIDATION.md
+TOKEN_OVERFLOW_FIX_SUMMARY.md
+VALIDATION_GUIDE.md

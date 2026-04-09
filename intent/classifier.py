@@ -293,62 +293,7 @@ class IntentClassifier:
             result["intent"], result["metric"], result["period"], result["confidence"],
         )
 
-        # Exploratory / schema questions don't need metric or period — let them pass
-        _EXPLORATORY = re.compile(
-            r"\b(what|which|list|show|display|give me|tell me|are there|how many)\b"
-            r".{0,60}"
-            r"\b(cities|regions|carriers|routes|plants|warehouses|tables|columns|"
-            r"available|stored|exist|options|values|records|data)\b",
-            re.IGNORECASE,
-        )
-        if _EXPLORATORY.search(text):
-            return result
-
-        missing = []
-        if result["metric"] is None:
-            missing.append("metric (e.g. 'warehouse utilisation', 'OTIF', 'lead time')")
-        if result["period"] is None:
-            missing.append("time period (e.g. '2024', 'December 2024', 'Q1 2024', 'January 2024')")
-
-        if missing:
-            # Build a dynamic suggestion using what the user already provided
-            metric_example = result["metric"] or "warehouse utilisation"
-            cities         = result.get("cities", [])
-            regions        = result.get("regions", [])
-
-            location_phrase = ""
-            if len(cities) >= 2:
-                location_phrase = f" between {cities[0]} and {cities[1]}"
-            elif len(cities) == 1:
-                location_phrase = f" in {cities[0]}"
-            elif len(regions) >= 2:
-                location_phrase = f" between {regions[0]} and {regions[1]}"
-            elif len(regions) == 1:
-                location_phrase = f" in {regions[0]}"
-
-            # Suggest what's missing based on what's already in the query
-            if result["metric"] is None and result["period"] is None:
-                period_suggestion = "2024"
-                metric_display = "warehouse utilisation"
-            elif result["metric"] is None:
-                period_suggestion = result["period"]
-                metric_display = "warehouse utilisation"
-            else:
-                period_suggestion = "2024"
-                metric_display = metric_example.replace("_", " ")
-
-            # Use "for" with relative periods, "in" with specific months/years
-            preposition = "for" if period_suggestion in (
-                "last month", "this month", "last week", "this week",
-                "last quarter", "this quarter", "this year", "last year",
-                "last_month", "this_month", "last_week", "this_week",
-            ) else "in"
-            example = f"'{metric_display.capitalize()}{location_phrase} {preposition} {period_suggestion}'"
-
-            raise ValueError(
-                f"Incomplete query — could not determine: {', '.join(missing)}.\n"
-                f"Please include both a KPI and a time period. For example:\n"
-                f"  {example}"
-            )
-
+        # CHANGED: Accept ALL queries — let the SQL agent figure out what to query
+        # The SQL agent is smart enough to handle any natural language question
+        # and generate appropriate SQL based on the database schema
         return result

@@ -52,8 +52,9 @@ class QueryRouter:
         logger.info("PostgreSQL returned %d rows", len(data))
 
         # ── 3. Similarity search → pgvector for KPI context ───────────────────
+        # Reduced to top_k=2 to prevent token overflow
         logger.info("MCP running similarity search for context")
-        context = self.vector_store.search(original_query, top_k=3)
+        context = self.vector_store.search(original_query, top_k=2)
         logger.info("VectorStore returned %d context items", len(context))
 
         return {

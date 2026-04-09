@@ -18,6 +18,7 @@
 
 import sys
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()  # must be before any module that reads env vars
@@ -28,6 +29,7 @@ from intent.classifier import IntentClassifier
 from agent.sql_agent import SQLAgent
 from mcp.router import QueryRouter
 from response.generator import ResponseGenerator
+from validation.aris_validator import ARISValidator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +45,7 @@ classifier   = IntentClassifier()
 agent        = SQLAgent(db)
 router       = QueryRouter(db, vector_store)
 responder    = ResponseGenerator()
+validator    = ARISValidator(db)
 
 MAX_RETRIES = 3
 
@@ -105,7 +108,7 @@ def handle_query(query: str) -> dict:
         # 3. LLM Service — Response Generation
         answer = responder.generate(query, mcp_result["data"], mcp_result["context"])
 
-        return {
+        result = {
             "answer":    answer,
             "sql":       mcp_result["sql"],
             "result":    mcp_result["data"],
@@ -113,6 +116,17 @@ def handle_query(query: str) -> dict:
             "success":   True,
             "error":     None,
         }
+
+        # 4. Validate against ARIS dashboard data (Supabase)
+        validation = validator.validate_response(
+            query=query,
+            sql=mcp_result["sql"],
+            ai_result=mcp_result["data"],
+            ai_answer=answer
+        )
+        result["validation"] = validation
+
+        return result
 
     except Exception as e:
         logger.error("Pipeline error: %s", e, exc_info=True)
@@ -143,6 +157,20 @@ def _run_one(query: str) -> None:
     print()
     if result["success"]:
         print(result["answer"])
+
+        # Display ARIS validation if available
+        validation = result.get("validation", {})
+        if validation.get("validated"):
+            print("\n" + "─" * 60)
+            print("📊 ARIS Dashboard Validation")
+            print("─" * 60)
+            print(f"{validation['match_emoji']} Match: {'PASSED' if validation['passed'] else 'FAILED'}")
+            print(f"   AI Value:    {validation['ai_value']} {validation.get('unit', '')}")
+            print(f"   ARIS Value:  {validation['aris_value']} {validation.get('unit', '')}")
+            print(f"   Difference:  {validation['difference']:.2f} (tolerance: ±{validation['tolerance']})")
+            print(f"   % Diff:      {validation['percentage_diff']:.2f}%")
+            print(f"   Source:      {validation['source']}")
+            print("─" * 60)
     else:
         print(f"Error: {result['error']}")
     print()

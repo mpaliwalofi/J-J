@@ -24,11 +24,11 @@ SAMPLE_INTENT = {
 }
 
 SAMPLE_SCHEMA = (
-    'Table: kpi_tuned\n'
+    'Table: Supply_Chain_KPI_Tuned\n'
     '  Columns: "Case ID" (text), "Daily Shift Capacity Utilization (%)" (double precision), '
     '"Region of the Country" (text), "Warehouse_Record_Date" (text)\n'
     '  Note: use double-quoted names exactly as shown above\n\n'
-    'Table: delivery_dim\n'
+    'Table: Delivery_Dim\n'
     '  Columns: "Case ID" (text), "Source City" (text), "Delivery_Date" (timestamp with time zone)\n'
     '  Note: use double-quoted names exactly as shown above'
 )
@@ -37,15 +37,15 @@ SAMPLE_SCHEMA = (
 def _make_agent():
     """Return an SQLAgent with a mocked QueryRunner."""
     mock_db = MagicMock()
-    mock_db.list_tables.return_value = ["kpi_tuned", "delivery_dim"]
+    mock_db.list_tables.return_value = ["Supply_Chain_KPI_Tuned", "Delivery_Dim"]
     mock_db.get_schema.side_effect = lambda table: {
-        "kpi_tuned": {
+        "Supply_Chain_KPI_Tuned": {
             "Case ID": "text",
             "Daily Shift Capacity Utilization (%)": "double precision",
             "Region of the Country": "text",
             "Warehouse_Record_Date": "text",
         },
-        "delivery_dim": {
+        "Delivery_Dim": {
             "Case ID": "text",
             "Source City": "text",
             "Delivery_Date": "timestamp with time zone",
@@ -59,12 +59,12 @@ class TestSQLAgentGenerate:
     def test_generate_returns_select_string(self):
         agent = _make_agent()
         expected_sql = (
-            'SELECT delivery_dim."Source City", AVG(kpi_tuned."Daily Shift Capacity Utilization (%)") '
-            'AS avg_utilisation FROM kpi_tuned '
-            'JOIN delivery_dim ON kpi_tuned."Case ID" = delivery_dim."Case ID" '
-            'WHERE delivery_dim."Source City" IN (\'Mumbai\', \'Delhi\') '
-            'AND kpi_tuned."Warehouse_Record_Date" LIKE \'2024-12%\' '
-            'GROUP BY delivery_dim."Source City" LIMIT 500'
+            'SELECT "Delivery_Dim"."Source City", AVG("Supply_Chain_KPI_Tuned"."Daily Shift Capacity Utilization (%)") '
+            'AS avg_utilisation FROM "Supply_Chain_KPI_Tuned" '
+            'JOIN "Delivery_Dim" ON "Supply_Chain_KPI_Tuned"."Case ID" = "Delivery_Dim"."Case ID" '
+            'WHERE "Delivery_Dim"."Source City" IN (\'Mumbai\', \'Delhi\') '
+            'AND "Supply_Chain_KPI_Tuned"."Warehouse_Record_Date" LIKE \'2024-12%\' '
+            'GROUP BY "Delivery_Dim"."Source City" LIMIT 500'
         )
         mock_response = MagicMock()
         mock_response.choices[0].message.content = (
@@ -121,7 +121,7 @@ class TestSQLAgentRefine:
         with patch("agent.sql_agent.client") as mock_client:
             mock_client.chat.completions.create.return_value = mock_response
             agent.refine(
-                failed_sql='SELECT "Region" FROM kpi_tuned',
+                failed_sql='SELECT "Region" FROM "Supply_Chain_KPI_Tuned"',
                 error='column "Region" does not exist',
                 intent=SAMPLE_INTENT,
                 original_query="Compare warehouse utilisation in December 2024",
@@ -130,7 +130,7 @@ class TestSQLAgentRefine:
             user_message = call_args[1]["messages"][1]["content"]
 
         assert "Database Schema" in user_message
-        assert "kpi_tuned" in user_message
+        assert "Supply_Chain_KPI_Tuned" in user_message
 
     def test_refine_raises_on_bad_json(self):
         agent = _make_agent()
@@ -149,7 +149,7 @@ class TestSQLAgentRefine:
 
     def test_refine_returns_fixed_sql(self):
         agent = _make_agent()
-        fixed_sql = "SELECT region FROM kpi_tuned LIMIT 500"
+        fixed_sql = "SELECT region FROM \"Supply_Chain_KPI_Tuned\" LIMIT 500"
         mock_response = MagicMock()
         mock_response.choices[0].message.content = (
             '{"action": "generate_sql", "query": "' + fixed_sql + '"}'
@@ -158,7 +158,7 @@ class TestSQLAgentRefine:
         with patch("agent.sql_agent.client") as mock_client:
             mock_client.chat.completions.create.return_value = mock_response
             result = agent.refine(
-                failed_sql='SELECT "Region" FROM kpi_tuned',
+                failed_sql='SELECT "Region" FROM "Supply_Chain_KPI_Tuned"',
                 error='column "Region" does not exist',
                 intent=SAMPLE_INTENT,
                 original_query="test",

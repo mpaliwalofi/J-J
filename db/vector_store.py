@@ -66,8 +66,13 @@ class VectorStore:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def search(self, query: str, top_k: int = 3) -> list[dict]:
-        """Return top_k KPI context items most relevant to the query."""
+    def search(self, query: str, top_k: int = 2) -> list[dict]:
+        """
+        Return top_k KPI context items most relevant to the query.
+
+        IMPORTANT: Default reduced to 2 to prevent token overflow.
+        Context is supplementary — prioritize data over excessive context.
+        """
         if self._pgvector_ready:
             return self._pgvector_search(query, top_k)
         return self._keyword_search(query, top_k)
