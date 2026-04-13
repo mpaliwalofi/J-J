@@ -127,11 +127,11 @@
     "Shipment Affected": {
       "depends_on": [],
       "source_tables": [
-        "Supply_Chain_KPI_Tuned"
+        "Supply_Chain_KPI_Single_Sheet"
       ],
       "layer": 0,
       "pql_logic": "CASE WHEN (\"Supply_Chain_KPI_Single_Sheet_5500_csv\".\"Shipment Affected\"=1) THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN sk.\"Shipment Affected\" = 1 THEN 1 ELSE 0 END",
+      "sql_logic": "CASE WHEN ss.\"Shipment Affected\" = 1 THEN 1 ELSE 0 END",
       "definition": "Indicates shipment affected by disruption."
     },
     "Stock Shortage in Warehouse": {
@@ -158,11 +158,11 @@
     "Warehouse Issue": {
       "depends_on": [],
       "source_tables": [
-        "Supply_Chain_KPI_Tuned"
+        "Supply_Chain_KPI_Single_Sheet"
       ],
       "layer": 0,
       "pql_logic": "CASE WHEN (\"Supply_Chain_KPI_Single_Sheet_5500_csv\".\"Warehouse Issue\"!='None') THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN sk.\"Warehouse Issue\" != 'None' THEN 1 ELSE 0 END",
+      "sql_logic": "CASE WHEN ss.\"Warehouse Issue\" != 'None' THEN 1 ELSE 0 END",
       "definition": "Operational issues occurring in warehouse (labour shortage, inventory mismatch, system downtime)."
     },
     "On Time": {
@@ -299,7 +299,7 @@
       "layer": 2,
       "pql_logic": "(\"_ARIS.Case\".\"Delay Risk\" + \"_ARIS.Case\".\"Stock shortage in warehouse\" + \"_ARIS.Case\".\"Transport Delay\") / 3",
       "sql_logic": "(CASE WHEN dd.\"Delivery_Date\" > so.\"Requested_Delivery_Date\" AND so.\"Delivered Quantity\" < so.\"Order Quantity\" THEN 1 ELSE 0 END + CASE WHEN wd.\"QUANTITY\" < so.\"Order Quantity\" THEN 1 ELSE 0 END + CASE WHEN sk.\"Delivery Impacted by Route Disruptions\" = 'Yes' THEN 1 ELSE 0 END) / 3.0",
-      "definition": "Combined risk indicator — average of three risk signals."
+      "definition": "Combined risk indicator \u2014 average of three risk signals."
     },
     "Days Range Delay": {
       "depends_on": [
@@ -351,7 +351,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Delivery on time %' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Percentage of orders delivered on time — pre-aggregated ARIS dashboard value."
+      "definition": "Percentage of orders delivered on time \u2014 pre-aggregated ARIS dashboard value."
     },
     "Avg. Delay days": {
       "depends_on": [],
@@ -361,7 +361,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Avg. Delay days' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Average delay in days — pre-aggregated ARIS dashboard value."
+      "definition": "Average delay in days \u2014 pre-aggregated ARIS dashboard value."
     },
     "# Materials": {
       "depends_on": [],
@@ -371,7 +371,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '# Materials' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total number of distinct materials handled — pre-aggregated ARIS dashboard value."
+      "definition": "Total number of distinct materials handled \u2014 pre-aggregated ARIS dashboard value."
     },
     "Orders At Risk": {
       "depends_on": [],
@@ -381,7 +381,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Orders At Risk' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Percentage or count of orders at risk of failing delivery — pre-aggregated ARIS dashboard value."
+      "definition": "Percentage or count of orders at risk of failing delivery \u2014 pre-aggregated ARIS dashboard value."
     },
     "Delay Order Value(EUR)": {
       "depends_on": [],
@@ -391,7 +391,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Delay Order Value(EUR)' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total monetary value of delayed orders in EUR — pre-aggregated ARIS dashboard value."
+      "definition": "Total monetary value of delayed orders in EUR \u2014 pre-aggregated ARIS dashboard value."
     },
     "Packing accuracy": {
       "depends_on": [],
@@ -401,7 +401,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Packing accuracy' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Percentage of orders packed correctly — pre-aggregated ARIS dashboard value."
+      "definition": "Percentage of orders packed correctly \u2014 pre-aggregated ARIS dashboard value."
     },
     "# Shipment Affected": {
       "depends_on": [],
@@ -411,7 +411,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '# Shipment Affected' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Count of shipments affected by disruptions — pre-aggregated ARIS dashboard value."
+      "definition": "Count of shipments affected by disruptions \u2014 pre-aggregated ARIS dashboard value."
     },
     "Value at Risk (EUR)": {
       "depends_on": [],
@@ -421,7 +421,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Value at Risk (EUR)' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total value of orders at financial risk in EUR — pre-aggregated ARIS dashboard value."
+      "definition": "Total value of orders at financial risk in EUR \u2014 pre-aggregated ARIS dashboard value."
     },
     "Savings lost (EUR)": {
       "depends_on": [],
@@ -431,7 +431,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Savings lost (EUR)' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total savings lost due to supply chain failures in EUR — pre-aggregated ARIS dashboard value."
+      "definition": "Total savings lost due to supply chain failures in EUR \u2014 pre-aggregated ARIS dashboard value."
     },
     "Utilization Efficiency %": {
       "depends_on": [],
@@ -441,7 +441,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Utilization Efficiency %' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Warehouse or transport utilization efficiency as a percentage — pre-aggregated ARIS dashboard value."
+      "definition": "Warehouse or transport utilization efficiency as a percentage \u2014 pre-aggregated ARIS dashboard value."
     },
     "#Warehouse": {
       "depends_on": [],
@@ -451,7 +451,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '#Warehouse' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total number of active warehouses — pre-aggregated ARIS dashboard value."
+      "definition": "Total number of active warehouses \u2014 pre-aggregated ARIS dashboard value."
     },
     "# Total Operators": {
       "depends_on": [],
@@ -461,7 +461,7 @@
       "layer": 4,
       "pql_logic": "cases_table",
       "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '# Total Operators' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total number of operators active in the supply chain — pre-aggregated ARIS dashboard value."
+      "definition": "Total number of operators active in the supply chain \u2014 pre-aggregated ARIS dashboard value."
     }
   },
   "adjacency_list": {

@@ -20,6 +20,17 @@ FIXES APPLIED (2026-04-13):
   5. _build_from_clause: 'cases' source table was not handled; now supported.
   6. pql_to_sql: '_ARIS.Case' was replaced with alias 'sk' (wrong table);
      for computed KPIs the correct base comes from Delivery_Dim + Sales Order DIM.
+
+FIXES APPLIED (2026-04-13 patch 2):
+  7. KEYWORD_KPI_MAP: bare "warehouse" keyword was matching warehouse-count queries
+     (e.g. "Total count of operational warehouses") to 'Warehouse Issue' instead of
+     '#Warehouse'. Fixed by:
+       a) Adding explicit phrases for count/operational/total warehouses -> '#Warehouse'.
+       b) Bare "warehouse" now routes to '#Warehouse' (cases table) since count queries
+          are far more common than issue queries phrased with just "warehouse".
+       c) 'Warehouse Issue' now only triggers on explicit "warehouse issue" / "warehouse problem".
+  8. Dependency graph: 'Warehouse Issue' source_tables was ['Supply_Chain_KPI_Tuned']
+     but the column lives in 'Supply_Chain_KPI_Single_Sheet' — corrected.
 """
 
 import json
@@ -83,10 +94,18 @@ KEYWORD_KPI_MAP = {
     "# total operators":             "# Total Operators",
 
     # ── Computed KPIs (derived from dimensional tables) ────────────────────
-    # Warehouse
-    "warehouse issue":               "Warehouse Issue",
-    "warehouse problem":             "Warehouse Issue",
-    "warehouse":                     "Warehouse Issue",
+    # Warehouse Issue (computed — must be explicit phrasing only)
+    "warehouse issue":                  "Warehouse Issue",
+    "warehouse problem":                "Warehouse Issue",
+
+    # Warehouse count -> cases table (FIX: bare "warehouse" used to hit Warehouse Issue)
+    "count of operational warehouses":  "#Warehouse",
+    "operational warehouses":           "#Warehouse",
+    "count of warehouses":              "#Warehouse",
+    "number of warehouses":             "#Warehouse",
+    "total warehouses":                 "#Warehouse",
+    "# warehouse":                      "#Warehouse",
+    "warehouse":                        "#Warehouse",
 
     # OTIF  — NOTE: 'otif' maps to the COMPUTED OTIF KPI (On-Time AND In-Full),
     #         NOT to 'Delivery on time %' (which is on-time only, pre-aggregated).
@@ -370,6 +389,11 @@ class DeterministicSQLGenerator:
             base = '"Supply_Chain_KPI_Tuned" sk'
             base_alias = 'sk'
             base_name = 'Supply_Chain_KPI_Tuned'
+        elif 'Supply_Chain_KPI_Single_Sheet' in source_tables:
+            # FIX: Warehouse Issue and Shipment Affected live here, not in KPI_Tuned
+            base = '"Supply_Chain_KPI_Single_Sheet" ss'
+            base_alias = 'ss'
+            base_name = 'Supply_Chain_KPI_Single_Sheet'
         elif 'Sales Order DIM' in source_tables:
             base = '"Sales Order DIM" so'
             base_alias = 'so'
