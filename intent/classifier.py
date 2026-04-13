@@ -36,21 +36,57 @@ INTENTS = [
     "operational_status",
 ]
 
-# Supply-chain metrics found in training data
+# Supply-chain metrics found in training data + all KPIs supported by the SQL agent.
+# The classifier metric output feeds into the SQL agent's keyword matching as a fallback.
 _METRICS = {
-    "otif":                   ["otif", "on time in full"],
-    "on_time_delivery":       ["on.time delivery", "on-time delivery", "on time delivery", "delivery percentage", "delivery rate", "delivery performance"],
-    "failed_deliveries":      ["failed deliver", "failed order", "delivery failure", "undelivered"],
-    "sla_breach":             ["sla breach", "sla violation", "missed sla"],
-    "warehouse_utilisation":  ["warehouse utilis", "warehouse utiliz", "warehouse capacity", "storage utiliz"],
-    "load_rejection_rate":    ["load rejection", "rejection rate", "rejected load"],
-    "transit_time":           ["transit time", "in transit", "transit duration"],
-    "consolidation":          ["consolidation", "shipment consolidat"],
-    "order_fill_rate":        ["order fill", "fill rate"],
-    "avg_delay_duration":     ["delay duration", "average delay", "avg delay", "delay time"],
-    "last_mile_cost":         ["last.mile cost", "last mile cost", "delivery cost", "cost per shipment"],
-    "shipment_volume":        ["shipment volume", "number of shipment", "total shipment", "shipments"],
-    "return_rate":            ["return rate", "returned", "returns"],
+    # Core delivery KPIs
+    "otif":                       ["otif", "on time in full", "on-time in-full", "on time and in full"],
+    "predictive_otif":            ["predictive otif", "predicted otif", "predictive otif %"],
+    "on_time_delivery":           ["on.time delivery", "on-time delivery", "on time delivery",
+                                   "delivery on time", "delivery percentage", "delivery rate",
+                                   "delivery performance", "on time %"],
+    "in_full":                    ["in full", "infull", "in-full", "delivered in full"],
+
+    # Delay KPIs
+    "avg_delay_duration":         ["delay duration", "average delay", "avg delay", "delay time",
+                                   "avg. delay days", "delay days", "avg delay days"],
+    "delay_risk":                 ["delay risk"],
+    "transport_delay":            ["transport delay", "route disruption", "route disruptions"],
+
+    # Order status
+    "open_orders":                ["open orders", "pending orders"],
+    "orders_at_risk":             ["orders at risk", "at risk orders", "orders at risk %"],
+
+    # Warehouse KPIs
+    "warehouse_issue":            ["warehouse issue", "warehouse problem"],
+    "stock_shortage":             ["stock shortage", "inventory shortage"],
+    "warehouse_utilization":      ["warehouse utiliz", "utilization efficiency", "utilization efficiency %",
+                                   "warehouse capacity", "storage utiliz"],
+    "warehouse_count":            ["number of warehouses", "count of warehouses", "total warehouses",
+                                   "# warehouse", "# warehouses", "warehouse count"],
+
+    # Financial KPIs
+    "delay_order_value":          ["delay order value", "delay value"],
+    "savings_lost":               ["savings lost"],
+    "value_at_risk":              ["value at risk"],
+
+    # Shipment & material KPIs
+    "shipment_affected":          ["shipment affected", "shipments affected", "# shipment affected",
+                                   "affected shipments"],
+    "materials_count":            ["# materials", "number of materials", "material count"],
+    "total_operators":            ["total operators", "# total operators"],
+    "packing_accuracy":           ["packing accuracy"],
+
+    # Legacy / training-data metrics (kept for classifier coverage)
+    "failed_deliveries":          ["failed deliver", "failed order", "delivery failure", "undelivered"],
+    "sla_breach":                 ["sla breach", "sla violation", "missed sla"],
+    "load_rejection_rate":        ["load rejection", "rejection rate", "rejected load"],
+    "transit_time":               ["transit time", "in transit", "transit duration"],
+    "consolidation":              ["consolidation", "shipment consolidat"],
+    "order_fill_rate":            ["order fill", "fill rate"],
+    "last_mile_cost":             ["last.mile cost", "last mile cost", "delivery cost", "cost per shipment"],
+    "shipment_volume":            ["shipment volume", "number of shipment", "total shipment"],
+    "return_rate":                ["return rate", "returned", "returns"],
 }
 
 # Period keywords → canonical token

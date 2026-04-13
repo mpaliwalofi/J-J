@@ -7,7 +7,9 @@ FORBIDDEN_KEYWORDS = [
 ]
 
 def validate_sql(query: str) -> tuple[bool, str]:
-    clean = " ".join(query.split()).upper()
+    # Strip single-line comments before validation
+    stripped = re.sub(r'--[^\n]*', '', query)
+    clean = " ".join(stripped.split()).upper()
     for keyword in FORBIDDEN_KEYWORDS:
         if re.search(rf'\b{keyword}\b', clean):
             return False, f"Forbidden operation: {keyword}"

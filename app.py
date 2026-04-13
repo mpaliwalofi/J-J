@@ -161,16 +161,18 @@ def _run_one(query: str) -> None:
         # Display ARIS validation if available
         validation = result.get("validation", {})
         if validation.get("validated"):
-            print("\n" + "─" * 60)
-            print("📊 ARIS Dashboard Validation")
-            print("─" * 60)
-            print(f"{validation['match_emoji']} Match: {'PASSED' if validation['passed'] else 'FAILED'}")
+            sep = "-" * 60
+            print("\n" + sep)
+            print("ARIS Dashboard Validation")
+            print(sep)
+            match_status = "PASSED" if validation["passed"] else "FAILED"
+            print(f"Match: {match_status}")
             print(f"   AI Value:    {validation['ai_value']} {validation.get('unit', '')}")
             print(f"   ARIS Value:  {validation['aris_value']} {validation.get('unit', '')}")
-            print(f"   Difference:  {validation['difference']:.2f} (tolerance: ±{validation['tolerance']})")
+            print(f"   Difference:  {validation['difference']:.2f} (tolerance: +/-{validation['tolerance']})")
             print(f"   % Diff:      {validation['percentage_diff']:.2f}%")
             print(f"   Source:      {validation['source']}")
-            print("─" * 60)
+            print(sep)
     else:
         print(f"Error: {result['error']}")
     print()

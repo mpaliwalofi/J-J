@@ -1,41 +1,69 @@
 """
-SQL Agent - Strict KPI-Driven SQL Generation
+SQL Agent — Two-Stage NL → PQL → SQL Pipeline
 
-This module generates SQL queries STRICTLY from KPI definitions in CSV.
-NO LLM-based SQL generation. NO guessing. NO approximations.
+Stage 1: Natural Language → PQL
+  - Identifies the KPI from the user's query (keyword matching + intent fallback)
+  - Returns the PQL expression from kpi_definitions.csv (the authoritative source)
+  - PQL is J&J/ARIS Process Query Language — see kpi_definitions.csv PQL Logic column
 
-All SQL logic comes from data/kpi_definitions.csv and kpi_dependency_graph.json.
+Stage 2: PQL → SQL (PostgreSQL)
+  - Translates PQL to valid PostgreSQL SQL using the PQLTranslator class
+  - Applies table name mapping, function translation, and JOIN building
+  - For pre-aggregated ARIS KPIs: routes directly to the 'cases' table (exact values)
+  - For computed KPIs: translates the PQL row-level logic into aggregated SQL
 
-FIXES APPLIED (2026-04-13):
-  1. KEYWORD_KPI_MAP: removed phantom 'Utilization Efficiency' (no such KPI);
-     mapped to correct cases-table name 'Utilization Efficiency %'.
-  2. CASES_MAPPING: fixed 'otif' -> 'Delivery on time %' was semantically wrong;
-     'otif' now routes to the OTIF computed KPI, not the on-time % pre-agg value.
-     All 13 cases-table KPI names are now covered.
-  3. _generate_cases_query: was querying non-existent columns 'kpi_name'/'kpi_value';
-     fixed to use actual schema columns 'name'/'value'.
-  4. sql_logic in graph for On Time / Delay Risk / OTIF / Avg Delay Duration:
-     was referencing alias 'sk' (Supply_Chain_KPI_Tuned alias) instead of the
-     correct Delivery_Dim (dd) and Sales Order DIM (so) aliases.
-  5. _build_from_clause: 'cases' source table was not handled; now supported.
-  6. pql_to_sql: '_ARIS.Case' was replaced with alias 'sk' (wrong table);
-     for computed KPIs the correct base comes from Delivery_Dim + Sales Order DIM.
+PQL ↔ SQL Translation Rules (derived from kpi_definitions.csv PQL Logic column):
+  Table references:
+    "Delivery DIM_csv"."Col"                 → dd."Col"   (Delivery_Dim)
+    "Sales Order DIM_csv"."Col"              → so."Col"   (Sales Order DIM)
+    "Warehouse DIM_csv"."Col"                → wd."Col"   (Warehouse DIM)
+    "Supply_Chain_KPI_Tuned_5500_csv"."Col"  → sk."Col"   (Supply_Chain_KPI_Tuned)
+    "Supply_Chain_KPI_Single_Sheet_5500_csv" → ss."Col"   (Supply_Chain_KPI_Single_Sheet)
+    "_ARIS.Case"."Col"                       → sk."Col"   (Supply_Chain_KPI_Tuned)
 
-FIXES APPLIED (2026-04-13 patch 2):
-  7. KEYWORD_KPI_MAP: bare "warehouse" keyword was matching warehouse-count queries
-     (e.g. "Total count of operational warehouses") to 'Warehouse Issue' instead of
-     '#Warehouse'. Fixed by:
-       a) Adding explicit phrases for count/operational/total warehouses -> '#Warehouse'.
-       b) Bare "warehouse" now routes to '#Warehouse' (cases table) since count queries
-          are far more common than issue queries phrased with just "warehouse".
-       c) 'Warehouse Issue' now only triggers on explicit "warehouse issue" / "warehouse problem".
-  8. Dependency graph: 'Warehouse Issue' source_tables was ['Supply_Chain_KPI_Tuned']
-     but the column lives in 'Supply_Chain_KPI_Single_Sheet' — corrected.
+  Functions:
+    NULL_DATE                                → NULL
+    NULL_TEXT                                → NULL
+    TIME_BETWEEN(a, b)                       → EXTRACT(EPOCH FROM (b - a)) * 1000
+    CT(col)                                  → COUNT(col)
+    CTD(col)                                 → COUNT(DISTINCT col)
+    MED(col)                                 → PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY col)
+    TO_DATE(col)                             → col::DATE
+    QUERY(expr)                              → (SELECT expr FROM …)
+    SUM, AVG                                 → SQL SUM, AVG (direct)
+
+ARIS Dashboard Ground Truth — pre-aggregated in 'cases' table:
+  KPI name (exact)          | ARIS value
+  ────────────────────────────────────────
+  'Delivery on time %'      | 52.5%
+  'Avg. Delay days'         | 105d
+  'Open orders'             | 4.0k
+  'Orders At Risk'          | 77.1%
+  'Delay Order Value(EUR)'  | 18.0m
+  'Packing accuracy'        | 95%
+  'Savings lost (EUR)'      | 3.2m
+  'Utilization Efficiency %'| 60.4%
+  '# Materials'             | 2.6k
+  '# Total Operators'       | 370
+  'Value at Risk (EUR)'     | 24m
+  'Warehouse Issue'         | 1.5k
+  '#Warehouse'              | 40
+
+Computed KPIs (not in cases table — translated via PQL):
+  OTIF %                    | ~24.8% (median of Delivery Compliance %)
+  Predictive OTIF %         | ~24.8% (same proxy; ARIS ML probabilities unavailable)
+  # Shipment Affected       | ~4,048 (from Supply_Chain_KPI_Single_Sheet)
+  InFull                    | computed
+  Delay Risk                | computed
+  Transport Delay           | computed
+  Stock Shortage            | computed
+  Risk Ratio                | computed
+  Check Predictive OTIF     | computed
 """
 
 import json
 import csv
-import os
+import re
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -48,603 +76,837 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 KPI_DEFINITIONS_PATH = Path(__file__).parent.parent / "data" / "kpi_definitions.csv"
-KPI_GRAPH_PATH = Path(__file__).parent.parent / "data" / "kpi_dependency_graph.json"
+KPI_GRAPH_PATH       = Path(__file__).parent.parent / "data" / "kpi_dependency_graph.json"
 
 # ============================================================================
-# CASES TABLE KPI NAMES (exact strings as stored in cases.name column)
+# CASES TABLE — pre-aggregated ARIS KPI names (exact strings)
 # ============================================================================
 
-CASES_TABLE_KPI_NAMES: set = {
-    "Delivery on time %",
-    "Avg. Delay days",
-    "# Materials",
-    "Orders At Risk",
-    "Delay Order Value(EUR)",
-    "Packing accuracy",
-    "Warehouse Issue",
-    "# Shipment Affected",
-    "Value at Risk (EUR)",
-    "Savings lost (EUR)",
-    "Utilization Efficiency %",
-    "#Warehouse",
-    "# Total Operators",
+# Maps from our internal KPI names → exact cases.name values
+CASES_TABLE_MAP: Dict[str, str] = {
+    "Delivery on time %":    "Delivery on time %",
+    "On Time":               "Delivery on time %",
+    "On Time Probability":   "Delivery on time %",
+    "Avg. Delay days":       "Avg. Delay days",
+    "Avg Delay Duration":    "Avg. Delay days",
+    "Avg Days Delay Duration":"Avg. Delay days",
+    "Open Orders":           "Open orders",         # lowercase 'o' in cases table
+    "Orders at Risk":        "Orders At Risk",
+    "Delay Order Value(EUR)":"Delay Order Value(EUR)",
+    "Packing accuracy":      "Packing accuracy",
+    "Savings lost (EUR)":    "Savings lost (EUR)",
+    "Utilization Efficiency %": "Utilization Efficiency %",
+    "# Materials":           "# Materials",
+    "# Total Operators":     "# Total Operators",
+    "Value at Risk (EUR)":   "Value at Risk (EUR)",
+    "Warehouse Issue":       "Warehouse Issue",
+    "#Warehouse":            "#Warehouse",
 }
 
 # ============================================================================
-# KEYWORD-TO-KPI MAPPING (Step 1: Keyword Match)
-# Priority: longer / more specific phrases must appear BEFORE shorter ones.
+# PQL → SQL TRANSLATOR
 # ============================================================================
 
-KEYWORD_KPI_MAP = {
-    # ── Cases-table KPIs (pre-aggregated ARIS values) ──────────────────────
-    "utilization efficiency":        "Utilization Efficiency %",   # FIX: was 'Utilization Efficiency' (didn't exist)
-    "utilization efficiency %":      "Utilization Efficiency %",
-    "packing accuracy":              "Packing accuracy",
-    "value at risk":                 "Value at Risk (EUR)",
-    "savings lost":                  "Savings lost (EUR)",
-    "delay order value":             "Delay Order Value(EUR)",
-    "# materials":                   "# Materials",
-    "number of materials":           "# Materials",
-    "materials":                     "# Materials",
-    "# shipment affected":           "# Shipment Affected",
-    "shipment affected":             "# Shipment Affected",
-    "number of warehouses":          "#Warehouse",
-    "# warehouse":                   "#Warehouse",
-    "total operators":               "# Total Operators",
-    "# total operators":             "# Total Operators",
-
-    # ── Computed KPIs (derived from dimensional tables) ────────────────────
-    # Warehouse Issue (computed — must be explicit phrasing only)
-    "warehouse issue":                  "Warehouse Issue",
-    "warehouse problem":                "Warehouse Issue",
-
-    # Warehouse count -> cases table (FIX: bare "warehouse" used to hit Warehouse Issue)
-    "count of operational warehouses":  "#Warehouse",
-    "operational warehouses":           "#Warehouse",
-    "count of warehouses":              "#Warehouse",
-    "number of warehouses":             "#Warehouse",
-    "total warehouses":                 "#Warehouse",
-    "# warehouse":                      "#Warehouse",
-    "warehouse":                        "#Warehouse",
-
-    # OTIF  — NOTE: 'otif' maps to the COMPUTED OTIF KPI (On-Time AND In-Full),
-    #         NOT to 'Delivery on time %' (which is on-time only, pre-aggregated).
-    "otif":                          "OTIF",
-    "on time in full":               "OTIF",
-    "on-time in-full":               "OTIF",
-
-    # On Time (computed flag per order)
-    "delivery on time percentage":   "On Time Probability",
-    "ontime percentage":             "On Time Probability",
-    "on time percentage":            "On Time Probability",
-    "on time probability":           "On Time Probability",
-    "delivery on time":              "On Time",
-    "on time":                       "On Time",
-    "ontime":                        "On Time",
-
-    # Delivery on time % (pre-aggregated cases table value)
-    "delivery on time %":            "Delivery on time %",
-
-    # Delay
-    "avg delay duration":            "Avg Delay Duration",
-    "average delay duration":        "Avg Delay Duration",
-    "avg delay":                     "Avg Delay Duration",
-    "average delay":                 "Avg Delay Duration",
-    "delay duration":                "Avg Delay Duration",
-    "avg. delay days":               "Avg. Delay days",
-    "average delay days":            "Avg. Delay days",
-    "delay days":                    "Avg. Delay days",
-    "delay":                         "Avg Delay Duration",
-
-    # Orders at Risk (computed)
-    "orders at risk":                "Orders at Risk",
-    "at risk":                       "Orders at Risk",
-    "risk orders":                   "Orders at Risk",
-
-    # Orders At Risk (cases table pre-agg)
-    "orders at risk %":              "Orders At Risk",
-
-    # Open Orders
-    "open orders":                   "Open Orders",
-    "pending orders":                "Open Orders",
-
-    # InFull
-    "in full":                       "InFull",
-    "infull":                        "InFull",
-    "delivered in full":             "InFull",
-
-    # Predictive OTIF
-    "predictive otif":               "Predictive OTIF %",
-    "predicted otif":                "Predictive OTIF %",
-
-    # Transport Delay
-    "transport delay":               "Transport Delay",
-    "route disruption":              "Transport Delay",
-
-    # Stock Shortage
-    "stock shortage":                "Stock Shortage in Warehouse",
-    "inventory shortage":            "Stock Shortage in Warehouse",
-
-    # Delay Risk
-    "delay risk":                    "Delay Risk",
+# Table name mapping: PQL table reference → (actual SQL table name, alias)
+PQL_TABLE_MAP: Dict[str, Tuple[str, str]] = {
+    "Delivery DIM_csv":                         ("Delivery_Dim",                    "dd"),
+    "Sales Order DIM_csv":                      ("Sales Order DIM",                 "so"),
+    "Warehouse DIM_csv":                        ("Warehouse DIM",                   "wd"),
+    "Supply_Chain_KPI_Tuned_5500_csv":          ("Supply_Chain_KPI_Tuned",          "sk"),
+    "Supply_Chain_KPI_Single_Sheet_5500_csv":   ("Supply_Chain_KPI_Single_Sheet",   "ss"),
+    "_ARIS.Case":                               ("Supply_Chain_KPI_Tuned",          "sk"),
 }
 
-# ============================================================================
-# DATE COLUMN MAPPING PER TABLE ALIAS
-# ============================================================================
-
-DATE_COLUMN_MAP = {
-    'sk':  '"Delivery Date"',        # Supply_Chain_KPI_Tuned
-    'dd':  '"Delivery_Date"',        # Delivery_Dim
-    'so':  '"Requested_Delivery_Date"',  # Sales Order DIM
-    'wd':  '"Warehouse_Record_Date"',    # Warehouse DIM
-    'ss':  '"Warehouse_Record_Date"',    # Supply_Chain_KPI_Single_Sheet
-    't':   '"Warehouse_Record_Date"',    # fallback
+# Standard JOIN clauses between tables (all on "Case ID")
+JOIN_CLAUSES: Dict[str, str] = {
+    "Delivery_Dim":                  'LEFT JOIN "Delivery_Dim" dd ON {base}."Case ID" = dd."Case ID"',
+    "Sales Order DIM":               'LEFT JOIN "Sales Order DIM" so ON {base}."Case ID" = so."Case ID"',
+    "Warehouse DIM":                 'LEFT JOIN "Warehouse DIM" wd ON {base}."Case ID" = wd."Case ID"',
+    "Supply_Chain_KPI_Single_Sheet": 'LEFT JOIN "Supply_Chain_KPI_Single_Sheet" ss ON {base}."Case ID" = ss."Case ID"',
+    "Delivery_Dim_dd":               'LEFT JOIN "Delivery_Dim" dd ON {base}."Case ID" = dd."Case ID"',
 }
 
-# ============================================================================
-# LOAD KPI DEFINITIONS FROM CSV
-# ============================================================================
-
-class KPIDefinitions:
-    """Loads and manages KPI definitions from CSV."""
-
-    def __init__(self, csv_path: Path):
-        self.definitions = {}
-        self.load_from_csv(csv_path)
-
-    def load_from_csv(self, csv_path: Path):
-        if not csv_path.exists():
-            logger.error(f"KPI definitions CSV not found: {csv_path}")
-            return
-
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                kpi_name = row['KPI Name'].strip()
-                self.definitions[kpi_name] = {
-                    'name': kpi_name,
-                    'definition': row['Definition'],
-                    'source_column': row['Source Column'],
-                    'pql_logic': row['PQL Logic'],
-                    'purpose': row['Purpose / Meaning']
-                }
-
-        logger.info(f"Loaded {len(self.definitions)} KPI definitions from CSV")
-
-    def get(self, kpi_name: str) -> Optional[Dict]:
-        return self.definitions.get(kpi_name)
-
-    def exists(self, kpi_name: str) -> bool:
-        return kpi_name in self.definitions
-
-    def all_names(self) -> List[str]:
-        return list(self.definitions.keys())
+# Priority order for choosing the base (FROM) table
+BASE_TABLE_PRIORITY = [
+    "Supply_Chain_KPI_Tuned",
+    "Supply_Chain_KPI_Single_Sheet",
+    "Delivery_Dim",
+    "Sales Order DIM",
+    "Warehouse DIM",
+]
 
 
-# ============================================================================
-# LOAD KPI DEPENDENCY GRAPH
-# ============================================================================
+class PQLTranslator:
+    """
+    Stage 2: PQL → PostgreSQL SQL translator.
 
-class KPIDependencyGraph:
-    """Manages KPI dependencies and layering."""
+    Translates PQL row-level logic (from kpi_definitions.csv) to SQL CASE expressions,
+    then wraps them in the requested aggregation (SUM / AVG / COUNT / PERCENTILE_CONT).
 
-    def __init__(self, graph_path: Path):
-        self.graph = {}
-        self.layers = {}
-        self.adjacency = {}
-        self.load_from_json(graph_path)
+    Usage:
+        translator = PQLTranslator()
+        # Row-level translation
+        sql_expr = translator.translate_expr(pql_logic)
+        # Full SELECT statement
+        sql = translator.build_select(pql_logic, aggregation, source_tables, filters)
+    """
 
-    def load_from_json(self, graph_path: Path):
-        if not graph_path.exists():
-            logger.error(f"KPI dependency graph not found: {graph_path}")
-            return
-
-        with open(graph_path, 'r') as f:
-            data = json.load(f)
-            self.graph = data.get('graph', {})
-            self.layers = data.get('layers', {})
-            self.adjacency = data.get('adjacency_list', {})
-
-        logger.info(f"Loaded dependency graph with {len(self.graph)} KPIs")
-
-    def get_dependencies(self, kpi_name: str) -> List[str]:
-        kpi_info = self.graph.get(kpi_name, {})
-        return kpi_info.get('depends_on', [])
-
-    def get_sql_logic(self, kpi_name: str) -> Optional[str]:
-        kpi_info = self.graph.get(kpi_name, {})
-        return kpi_info.get('sql_logic')
-
-    def get_source_tables(self, kpi_name: str) -> List[str]:
-        kpi_info = self.graph.get(kpi_name, {})
-        return kpi_info.get('source_tables', [])
-
-    def is_cases_kpi(self, kpi_name: str) -> bool:
-        """Return True if this KPI is served directly from the cases table."""
-        tables = self.get_source_tables(kpi_name)
-        return tables == ['cases']
-
-
-# ============================================================================
-# SQL GENERATOR - DETERMINISTIC, NO LLM
-# ============================================================================
-
-class DeterministicSQLGenerator:
-    """Generates SQL strictly from KPI definitions — no LLM involved."""
-
-    def __init__(self, kpi_defs: KPIDefinitions, kpi_graph: KPIDependencyGraph):
-        self.kpi_defs = kpi_defs
-        self.kpi_graph = kpi_graph
-
-    def pql_to_sql(self, pql_logic: str, kpi_name: str) -> str:
+    def translate_expr(self, pql: str) -> str:
         """
-        Convert PQL logic to SQL, replacing ARIS-specific syntax and aliases.
+        Translate a PQL expression/row-level logic to a SQL expression.
 
-        FIX: '_ARIS.Case' was previously replaced with alias 'sk' which is the
-        Supply_Chain_KPI_Tuned alias. Computed KPIs that depend on delivery dates
-        use dd (Delivery_Dim) and so (Sales Order DIM) — their sql_logic in the
-        dependency graph is now correct, so we prefer that over PQL translation.
+        Applies in order:
+          1. Table alias substitutions (e.g. "Delivery DIM_csv". → dd.)
+          2. NULL sentinel replacement
+          3. TIME_BETWEEN function
+          4. CT / CTD / MED / TO_DATE function translations
+          5. QUERY() wrapper removal (becomes inline)
         """
-        sql = pql_logic
+        sql = pql
 
-        # Table alias substitutions
-        sql = sql.replace('"_ARIS.Case".', '')        # strip ARIS case prefix; columns resolved via graph sql_logic
-        sql = sql.replace('"_ARIS.Case"', '')
-        sql = sql.replace('"Delivery DIM_csv".', 'dd.')
-        sql = sql.replace('"Sales Order DIM_csv".', 'so.')
-        sql = sql.replace('"Warehouse DIM_csv".', 'wd.')
-        sql = sql.replace('"Supply_Chain_KPI_Tuned_5500_csv".', 'sk.')
-        sql = sql.replace('"Supply_Chain_KPI_Single_Sheet_5500_csv".', 'ss.')
+        # ── 1. Table alias substitutions ──────────────────────────────────
+        for pql_table, (_, alias) in PQL_TABLE_MAP.items():
+            # Match  "TableName"."Column"  →  alias."Column"
+            sql = sql.replace(f'"{pql_table}".', f'{alias}.')
+            # Match  "TableName"  (standalone reference without column)
+            sql = sql.replace(f'"{pql_table}"', f'"{alias}"')
 
-        # ARIS null sentinel replacement
-        sql = sql.replace('NULL_DATE', 'NULL')
-        sql = sql.replace('NULL_TEXT', 'NULL')
+        # ── 2. NULL sentinels ─────────────────────────────────────────────
+        sql = sql.replace("NULL_DATE", "NULL")
+        sql = sql.replace("NULL_TEXT", "NULL")
 
-        # ARIS TIME_BETWEEN -> PostgreSQL interval expression
-        # TIME_BETWEEN(a, b) = b - a in milliseconds
-        import re
+        # ── 3. TIME_BETWEEN(a, b) → EXTRACT(EPOCH FROM (b - a)) * 1000 ──
         sql = re.sub(
             r'TIME_BETWEEN\("([^"]+)",\s*"([^"]+)"\)',
             r'EXTRACT(EPOCH FROM ("\2" - "\1")) * 1000',
             sql
         )
 
-        return sql
+        # ── 4. Function translations ──────────────────────────────────────
+        # CT(col) → COUNT(col)
+        sql = re.sub(r'\bCT\(', 'COUNT(', sql)
 
-    def determine_aggregation(self, query: str, kpi_name: str) -> str:
-        query_lower = query.lower()
+        # CTD(col) → COUNT(DISTINCT col)
+        sql = re.sub(r'\bCTD\(', 'COUNT(DISTINCT ', sql)
 
-        if any(w in query_lower for w in ['how many', 'count', 'number of', 'total']):
-            return 'SUM'
-        if any(w in query_lower for w in ['percentage', 'rate', '%', 'percent', 'probability']):
-            return 'AVG'
-        if any(w in query_lower for w in ['average', 'mean', 'avg']):
-            return 'AVG'
+        # MED(col) → PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY col)
+        # Pattern: MED("col") → PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "col")
+        def _med_to_sql(m):
+            inner = m.group(1)
+            return f'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {inner})'
+        sql = re.sub(r'\bMED\(([^)]+)\)', _med_to_sql, sql)
 
-        kpi_def = self.kpi_defs.get(kpi_name)
-        if kpi_def:
-            pql = kpi_def['pql_logic']
-            if 'THEN 1 ELSE 0 END' in pql:
-                return 'SUM'
-            if any(w in pql for w in ['QUERY(', 'AVG(', 'SUM(', 'COUNT(']):
-                return 'NONE'
+        # TO_DATE("col") → "col"::DATE
+        sql = re.sub(r'\bTO_DATE\("([^"]+)"\)', r'"\1"::DATE', sql)
 
-        return 'AVG'
+        # QUERY(expr) → expr (inline; QUERY is a PQL aggregation wrapper)
+        sql = re.sub(r'\bQUERY\((.+)\)', r'\1', sql, flags=re.DOTALL)
 
-    def build_sql(self, kpi_name: str, query: str, filters: Dict = None) -> str:
+        return sql.strip()
+
+    def detect_source_tables(self, pql: str) -> List[str]:
         """
-        Build SQL for a KPI.  Always prefers sql_logic from the dependency graph
-        (which has already been corrected) over PQL translation.
+        Detect which source tables are referenced in a PQL expression.
+        Returns the list of actual SQL table names.
         """
-        # Prefer graph sql_logic (already correct)
-        sql_logic = self.kpi_graph.get_sql_logic(kpi_name)
+        tables: List[str] = []
+        for pql_table, (sql_table, _) in PQL_TABLE_MAP.items():
+            if f'"{pql_table}"' in pql and sql_table not in tables:
+                tables.append(sql_table)
+        return tables
 
-        if not sql_logic:
-            # Fallback: translate PQL
-            kpi_def = self.kpi_defs.get(kpi_name)
-            if not kpi_def:
-                raise ValueError(f"KPI '{kpi_name}' not found in definitions or graph")
-            sql_logic = self.pql_to_sql(kpi_def['pql_logic'], kpi_name)
+    def build_from_clause(self, source_tables: List[str]) -> Tuple[str, str]:
+        """
+        Build FROM + JOIN clause for the given source tables.
+        Returns (from_sql_string, base_alias).
+        """
+        if not source_tables:
+            return 'FROM "Supply_Chain_KPI_Tuned" sk', "sk"
 
-        source_tables = self.kpi_graph.get_source_tables(kpi_name)
+        # Pick base table by priority
+        base_table = None
+        for candidate in BASE_TABLE_PRIORITY:
+            if candidate in source_tables:
+                base_table = candidate
+                break
+        if base_table is None:
+            base_table = source_tables[0]
 
-        # Cases-table KPIs are returned as-is (they are complete SELECT statements)
-        if source_tables == ['cases']:
-            return sql_logic
+        # Alias for base table
+        alias_map = {sql_t: alias for _, (sql_t, alias) in PQL_TABLE_MAP.items()}
+        base_alias = alias_map.get(base_table, "t")
 
-        agg_type = self.determine_aggregation(query, kpi_name)
-
-        if agg_type == 'NONE':
-            select_expr = sql_logic
-        elif agg_type == 'SUM':
-            select_expr = f"SUM({sql_logic})"
-        else:
-            select_expr = f"AVG({sql_logic})"
-
-        from_clause, base_alias = self._build_from_clause(source_tables)
-        where_clause = self._build_where_clause(filters, base_alias, source_tables)
-
-        sql_parts = ["SELECT", f"  {select_expr} AS result", from_clause]
-        if where_clause:
-            sql_parts.append(where_clause)
-        sql_parts.append("LIMIT 100")
-
-        return "\n".join(sql_parts)
-
-    def _build_from_clause(self, source_tables: List[str]) -> Tuple[str, str]:
-        """Build FROM + JOIN clause.  Returns (sql_string, base_alias)."""
-
-        # FIX: 'cases' table is handled separately — should not reach here
-        # but guard just in case
-        if not source_tables or source_tables == ['cases']:
-            return 'FROM "Supply_Chain_KPI_Tuned" sk', 'sk'
-
-        # Choose primary (base) table by priority
-        if 'Delivery_Dim' in source_tables:
-            base = '"Delivery_Dim" dd'
-            base_alias = 'dd'
-            base_name = 'Delivery_Dim'
-        elif 'Supply_Chain_KPI_Tuned' in source_tables:
-            base = '"Supply_Chain_KPI_Tuned" sk'
-            base_alias = 'sk'
-            base_name = 'Supply_Chain_KPI_Tuned'
-        elif 'Supply_Chain_KPI_Single_Sheet' in source_tables:
-            # FIX: Warehouse Issue and Shipment Affected live here, not in KPI_Tuned
-            base = '"Supply_Chain_KPI_Single_Sheet" ss'
-            base_alias = 'ss'
-            base_name = 'Supply_Chain_KPI_Single_Sheet'
-        elif 'Sales Order DIM' in source_tables:
-            base = '"Sales Order DIM" so'
-            base_alias = 'so'
-            base_name = 'Sales Order DIM'
-        elif 'Warehouse DIM' in source_tables:
-            base = '"Warehouse DIM" wd'
-            base_alias = 'wd'
-            base_name = 'Warehouse DIM'
-        else:
-            base = f'"{source_tables[0]}"'
-            base_alias = 't'
-            base_name = source_tables[0]
-
-        from_parts = [f"FROM {base}"]
+        from_parts = [f'FROM "{base_table}" {base_alias}']
 
         for table in source_tables:
-            if table == base_name:
+            if table == base_table:
                 continue
-            if table == 'Delivery_Dim':
+            if table == "Delivery_Dim":
                 from_parts.append(
                     f'LEFT JOIN "Delivery_Dim" dd ON {base_alias}."Case ID" = dd."Case ID"'
                 )
-            elif table == 'Sales Order DIM':
+            elif table == "Sales Order DIM":
                 from_parts.append(
                     f'LEFT JOIN "Sales Order DIM" so ON {base_alias}."Case ID" = so."Case ID"'
                 )
-            elif table == 'Warehouse DIM':
+            elif table == "Warehouse DIM":
                 from_parts.append(
                     f'LEFT JOIN "Warehouse DIM" wd ON {base_alias}."Case ID" = wd."Case ID"'
                 )
-            elif table == 'Supply_Chain_KPI_Tuned':
+            elif table == "Supply_Chain_KPI_Tuned":
                 from_parts.append(
                     f'LEFT JOIN "Supply_Chain_KPI_Tuned" sk ON {base_alias}."Case ID" = sk."Case ID"'
                 )
-            elif table == 'Supply_Chain_KPI_Single_Sheet':
+            elif table == "Supply_Chain_KPI_Single_Sheet":
                 from_parts.append(
                     f'LEFT JOIN "Supply_Chain_KPI_Single_Sheet" ss ON {base_alias}."Case ID" = ss."Case ID"'
                 )
 
         return "\n".join(from_parts), base_alias
 
-    def _build_where_clause(self, filters: Dict, base_alias: str, source_tables: List[str]) -> str:
-        if not filters:
-            return ""
+    def build_select(
+        self,
+        pql_logic:    str,
+        aggregation:  str,          # SUM | AVG | COUNT | MEDIAN | RATE | NONE
+        source_tables: List[str],
+        period_cond:  str  = "",
+        city_cond:    str  = "",
+        label:        str  = "result",
+    ) -> str:
+        """
+        Build a complete SELECT statement from PQL row-level logic.
 
+        aggregation values:
+          SUM    → SUM(CASE WHEN ... THEN 1 ELSE 0 END)
+          AVG    → AVG(CASE WHEN ... THEN value END)
+          COUNT  → COUNT(col)  — when pql_logic is a simple column ref
+          MEDIAN → PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY col)
+          RATE   → SUM(flag) / COUNT(*) * 100
+          NONE   → raw expression (no outer aggregation)
+        """
+        sql_expr    = self.translate_expr(pql_logic)
+        from_clause, base_alias = self.build_from_clause(source_tables)
+
+        # Build SELECT expression based on aggregation type
+        if aggregation == "SUM":
+            select_expr = f"SUM({sql_expr}) AS {label}"
+        elif aggregation == "AVG":
+            select_expr = f"CAST(AVG({sql_expr}) AS NUMERIC(10,2)) AS {label}"
+        elif aggregation == "COUNT":
+            select_expr = f"COUNT({sql_expr}) AS {label}"
+        elif aggregation == "MEDIAN":
+            select_expr = (
+                f"CAST(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {sql_expr}) "
+                f"AS NUMERIC(10,2)) AS {label}"
+            )
+        elif aggregation == "RATE":
+            # Assumes pql_logic is a 0/1 CASE expression
+            select_expr = (
+                f"CAST(100.0 * SUM({sql_expr}) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS {label},\n"
+                f"  COUNT(*) AS total_orders"
+            )
+        else:  # NONE
+            select_expr = f"{sql_expr} AS {label}"
+
+        # Build WHERE clause
         where_parts = []
+        if period_cond:
+            where_parts.append(period_cond)
+        if city_cond:
+            where_parts.append(city_cond)
 
-        if filters.get('period'):
-            date_col = DATE_COLUMN_MAP.get(base_alias, '"Warehouse_Record_Date"')
-            where_parts.append(f'{base_alias}.{date_col} LIKE \'{filters["period"]}%\'')
+        parts = ["SELECT", f"  {select_expr}", from_clause]
+        if where_parts:
+            parts.append("WHERE " + "\n  AND ".join(where_parts))
+        parts.append("LIMIT 1000")
 
-        if filters.get('cities'):
-            if 'Delivery_Dim' in source_tables:
-                cities = "', '".join(filters['cities'])
-                where_parts.append(f'dd."Source City" IN (\'{cities}\')')
-
-        if filters.get('regions'):
-            regions = "', '".join(filters['regions'])
-            where_parts.append(f'{base_alias}."Region of the Country" IN (\'{regions}\')')
-
-        return ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+        return "\n".join(parts)
 
 
 # ============================================================================
-# MAIN SQL AGENT CLASS
+# KPI DEFINITIONS LOADER
+# ============================================================================
+
+class KPIDefinitions:
+    """Loads KPI definitions (including PQL Logic) from kpi_definitions.csv."""
+
+    def __init__(self, csv_path: Path):
+        self.definitions: Dict[str, Dict] = {}
+        self._load(csv_path)
+
+    def _load(self, csv_path: Path):
+        if not csv_path.exists():
+            logger.warning("KPI definitions CSV not found: %s", csv_path)
+            return
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                name = (row.get('KPI Name') or '').strip()
+                if name:
+                    self.definitions[name] = {
+                        'name':          name,
+                        'definition':    row.get('Definition', ''),
+                        'source_column': row.get('Source Column', ''),
+                        'pql_logic':     row.get('PQL Logic', ''),
+                        'purpose':       row.get('Purpose / Meaning', ''),
+                    }
+        logger.info("Loaded %d KPI definitions (with PQL Logic)", len(self.definitions))
+
+    def get(self, name: str) -> Optional[Dict]:
+        return self.definitions.get(name)
+
+    def get_pql(self, name: str) -> Optional[str]:
+        d = self.definitions.get(name)
+        return d['pql_logic'] if d else None
+
+    def all_names(self) -> List[str]:
+        return list(self.definitions.keys())
+
+
+# ============================================================================
+# KPI DEPENDENCY GRAPH LOADER
+# ============================================================================
+
+class KPIDependencyGraph:
+    """Loads the KPI dependency graph for source-table lookups."""
+
+    def __init__(self, graph_path: Path):
+        self.nodes: Dict = {}
+        self._load(graph_path)
+
+    def _load(self, graph_path: Path):
+        if not graph_path.exists():
+            logger.warning("KPI dependency graph not found: %s", graph_path)
+            return
+        with open(graph_path, 'r') as f:
+            data = json.load(f)
+        for node in data.get('graph', {}).get('nodes', []):
+            self.nodes[node['id']] = node
+        logger.info("Loaded dependency graph: %d nodes", len(self.nodes))
+
+    def get_source_tables(self, node_id: str) -> List[str]:
+        node = self.nodes.get(node_id, {})
+        return node.get('source_tables', [])
+
+    def get_node_by_label(self, label: str) -> Optional[Dict]:
+        for node in self.nodes.values():
+            if node.get('label', '').lower() == label.lower():
+                return node
+        return None
+
+
+# ============================================================================
+# KEYWORD → KPI NAME MAPPING
+# ============================================================================
+
+KEYWORD_KPI_MAP: Dict[str, str] = {
+    # Predictive OTIF (longer phrase first)
+    "predictive otif %":              "Predictive OTIF %",
+    "predictive otif":                "Predictive OTIF %",
+    "predicted otif":                 "Predictive OTIF %",
+
+    # OTIF
+    "on time in full":                "OTIF",
+    "on-time in-full":                "OTIF",
+    "on time and in full":            "OTIF",
+    "otif":                           "OTIF",
+
+    # Delivery on time
+    "delivery on time percentage":    "Delivery on time %",
+    "delivery on time %":             "Delivery on time %",
+    "delivery on time rate":          "Delivery on time %",
+    "on time probability":            "On Time Probability",
+    "on time percentage":             "Delivery on time %",
+    "ontime percentage":              "Delivery on time %",
+    "on time delivery":               "Delivery on time %",
+    "delivery on time":               "Delivery on time %",
+    "on time":                        "On Time",
+    "ontime":                         "On Time",
+
+    # In-Full
+    "in full":                        "InFull",
+    "infull":                         "InFull",
+    "delivered in full":              "InFull",
+    "in-full":                        "InFull",
+
+    # Delay
+    "avg. delay days":                "Avg. Delay days",
+    "average delay days":             "Avg. Delay days",
+    "avg delay days":                 "Avg. Delay days",
+    "delay days":                     "Avg. Delay days",
+    "avg delay duration":             "Avg Delay Duration",
+    "average delay duration":         "Avg Delay Duration",
+    "avg delay":                      "Avg Delay Duration",
+    "average delay":                  "Avg Delay Duration",
+    "delay duration":                 "Avg Delay Duration",
+    "delay":                          "Avg Delay Duration",
+
+    # Delay Risk
+    "delay risk":                     "Delay Risk",
+
+    # Orders
+    "orders at risk %":               "Orders at Risk",
+    "orders at risk":                 "Orders at Risk",
+    "at risk orders":                 "Orders at Risk",
+    "at risk":                        "Orders at Risk",
+    "open orders":                    "Open Orders",
+    "pending orders":                 "Open Orders",
+
+    # Warehouse (specific first)
+    "warehouse issue":                "Warehouse Issue",
+    "warehouse problem":              "Warehouse Issue",
+    "stock shortage":                 "Stock Shortage in Warehouse",
+    "inventory shortage":             "Stock Shortage in Warehouse",
+    "utilization efficiency %":       "Utilization Efficiency %",
+    "utilization efficiency":         "Utilization Efficiency %",
+    "warehouse utilization":          "Utilization Efficiency %",
+    "warehouse capacity":             "Utilization Efficiency %",
+    "number of warehouses":           "#Warehouse",
+    "count of warehouses":            "#Warehouse",
+    "total warehouses":               "#Warehouse",
+    "operational warehouses":         "#Warehouse",
+    "# warehouse":                    "#Warehouse",
+    "# warehouses":                   "#Warehouse",
+    "warehouse count":                "#Warehouse",
+    "warehouse":                      "#Warehouse",
+
+    # Financial
+    "delay order value":              "Delay Order Value(EUR)",
+    "delay value":                    "Delay Order Value(EUR)",
+    "value at risk":                  "Value at Risk (EUR)",
+    "savings lost":                   "Savings lost (EUR)",
+    "savings":                        "Savings lost (EUR)",
+
+    # Shipment
+    "# shipment affected":            "# Shipment Affected",
+    "shipment affected":              "# Shipment Affected",
+    "shipments affected":             "# Shipment Affected",
+    "affected shipments":             "# Shipment Affected",
+    "shipments were affected":        "# Shipment Affected",
+    "shipments":                      "# Shipment Affected",
+
+    # Materials
+    "# materials":                    "# Materials",
+    "number of materials":            "# Materials",
+    "materials":                      "# Materials",
+    "material count":                 "# Materials",
+
+    # Operators
+    "# total operators":              "# Total Operators",
+    "total operators":                "# Total Operators",
+    "operators":                      "# Total Operators",
+
+    # Transport
+    "transport delay":                "Transport Delay",
+    "route disruption":               "Transport Delay",
+    "route disruptions":              "Transport Delay",
+
+    # Packing
+    "packing accuracy":               "Packing accuracy",
+    "packing":                        "Packing accuracy",
+
+    # Risk
+    "risk ratio":                     "Risk Ratio",
+    "check predictive otif":          "Check Predictive OTIF",
+
+    # City
+    "by city":                        "City",
+    "per city":                       "City",
+    "city":                           "City",
+    "source city":                    "City",
+}
+
+# ============================================================================
+# KPI METADATA — aggregation type, PQL logic override, and ARIS reference
+# For KPIs where PQL from the CSV needs augmentation or a custom aggregation.
+# ============================================================================
+
+KPI_METADATA: Dict[str, Dict] = {
+    # Pre-aggregated in cases table — use cases table (no PQL translation needed)
+    "Delivery on time %":     {"tier": "cases", "aris": "52.5%"},
+    "On Time":                {"tier": "cases", "aris": "52.5%",  "cases_name": "Delivery on time %"},
+    "On Time Probability":    {"tier": "cases", "aris": "52.5%",  "cases_name": "Delivery on time %"},
+    "Avg. Delay days":        {"tier": "cases", "aris": "105d"},
+    "Avg Delay Duration":     {"tier": "cases", "aris": "105d",   "cases_name": "Avg. Delay days"},
+    "Avg Days Delay Duration":{"tier": "cases", "aris": "105d",   "cases_name": "Avg. Delay days"},
+    "Open Orders":            {"tier": "cases", "aris": "4.0k",   "cases_name": "Open orders"},
+    "Orders at Risk":         {"tier": "cases", "aris": "77.1%",  "cases_name": "Orders At Risk"},
+    "Delay Order Value(EUR)": {"tier": "cases", "aris": "18.0m"},
+    "Packing accuracy":       {"tier": "cases", "aris": "95%"},
+    "Savings lost (EUR)":     {"tier": "cases", "aris": "3.2m"},
+    "Utilization Efficiency %":{"tier":"cases", "aris": "60.4%"},
+    "# Materials":            {"tier": "cases", "aris": "2.6k"},
+    "# Total Operators":      {"tier": "cases", "aris": "370"},
+    "Value at Risk (EUR)":    {"tier": "cases", "aris": "24m"},
+    "Warehouse Issue":        {"tier": "cases", "aris": "1.5k"},
+    "#Warehouse":             {"tier": "cases", "aris": "40"},
+
+    # Computed via PQL translation
+    "OTIF": {
+        "tier": "computed",
+        "aris": "25.2%",
+        # ARIS stores per-case OTIF as "Delivery Compliance (%)"; median ≈ 25.2%
+        "pql_override": 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY sk."Delivery Compliance (%)") AS otif_pct, AVG(sk."Delivery Compliance (%)") AS otif_avg, COUNT(*) AS total_orders',
+        "agg": "NONE",
+        "from": 'FROM "Supply_Chain_KPI_Tuned" sk\nWHERE sk."Delivery Compliance (%)" IS NOT NULL',
+    },
+    "Predictive OTIF %": {
+        "tier": "computed",
+        "aris": "25.5%",
+        # Same proxy as OTIF — ARIS ML probabilities are not in our tables
+        "pql_override": 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY sk."Delivery Compliance (%)") AS predictive_otif_pct, COUNT(*) AS total_orders',
+        "agg": "NONE",
+        "from": 'FROM "Supply_Chain_KPI_Tuned" sk\nWHERE sk."Delivery Compliance (%)" IS NOT NULL',
+    },
+    "InFull": {
+        "tier": "computed",
+        "aris": "N/A",
+        "agg": "RATE",
+        "pql": 'CASE WHEN so."Delivered Quantity" >= so."Order Quantity" THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned", "Sales Order DIM"],
+        "label": "in_full_pct",
+    },
+    "# Shipment Affected": {
+        "tier": "computed",
+        "aris": "~4,048",
+        "agg": "SUM",
+        "pql": 'CASE WHEN ss."Shipment Affected" = 1 THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Single_Sheet"],
+        "label": "shipment_affected_count",
+    },
+    "Delay Risk": {
+        "tier": "computed",
+        "aris": "N/A",
+        "agg": "SUM",
+        "pql": 'CASE WHEN dd."Delivery_Date" > so."Requested_Delivery_Date" AND so."Delivered Quantity" < so."Order Quantity" THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim", "Sales Order DIM"],
+        "label": "delay_risk_count",
+    },
+    "Transport Delay": {
+        "tier": "computed",
+        "aris": "N/A",
+        "agg": "SUM",
+        "pql": 'CASE WHEN sk."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned"],
+        "label": "transport_delay_count",
+    },
+    "Stock Shortage in Warehouse": {
+        "tier": "computed",
+        "aris": "N/A",
+        "agg": "SUM",
+        "pql": 'CASE WHEN wd."QUANTITY" < so."Order Quantity" THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned", "Sales Order DIM", "Warehouse DIM"],
+        "label": "stock_shortage_count",
+    },
+    "Risk Ratio": {
+        "tier": "computed",
+        "aris": "N/A",
+        "agg": "AVG",
+        "pql": '(CASE WHEN dd."Delivery_Date" > so."Requested_Delivery_Date" AND so."Delivered Quantity" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN wd."QUANTITY" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN sk."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1.0 ELSE 0 END) / 3.0',
+        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim", "Sales Order DIM", "Warehouse DIM"],
+        "label": "avg_risk_ratio",
+    },
+    "Check Predictive OTIF": {
+        "tier": "computed",
+        "aris": "N/A",
+        "agg": "SUM",
+        "pql": 'CASE WHEN ((CASE WHEN dd."Delivery_Date" > so."Requested_Delivery_Date" AND so."Delivered Quantity" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN wd."QUANTITY" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN sk."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1.0 ELSE 0 END) / 3.0) > 0.4 THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim", "Sales Order DIM", "Warehouse DIM"],
+        "label": "high_risk_orders",
+    },
+    "City": {
+        "tier": "computed",
+        "aris": "N/A",
+        "pql_override": 'dd."Source City" AS city, COUNT(*) AS order_count, CAST(AVG(sk."Delivery Compliance (%)") AS NUMERIC(10,2)) AS avg_otif_pct, CAST(AVG(sk."Utilization Efficiency (%)") AS NUMERIC(10,2)) AS avg_utilization_pct',
+        "agg": "NONE",
+        "from": 'FROM "Supply_Chain_KPI_Tuned" sk\nLEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"\nWHERE dd."Source City" IS NOT NULL\nGROUP BY dd."Source City"\nORDER BY order_count DESC\nLIMIT 20',
+    },
+}
+
+# ============================================================================
+# DATE / PERIOD FILTER BUILDER
+# ============================================================================
+
+def _build_period_filter(period: str, base_alias: str = "sk") -> str:
+    """Convert period string to a SQL WHERE condition on Warehouse_Record_Date."""
+    if not period:
+        return ""
+
+    col = f'{base_alias}."Warehouse_Record_Date"'
+    period = str(period).strip().lower()
+
+    # Bare year: '2024'
+    if re.fullmatch(r'20\d{2}', period):
+        return f"{col} LIKE '{period}%'"
+
+    # Year-month: '2024-03'
+    if re.fullmatch(r'20\d{2}-\d{2}', period):
+        return f"{col} LIKE '{period}%'"
+
+    # Quarter: 'q1' … 'q4'
+    q_match = re.fullmatch(r'q([1-4])', period)
+    if q_match:
+        q = int(q_match.group(1))
+        ranges = {1: ("01", "03"), 2: ("04", "06"), 3: ("07", "09"), 4: ("10", "12")}
+        ms, me = ranges[q]
+        from datetime import date as dt
+        yr = dt.today().year
+        return f"{col} >= '{yr}-{ms}-01' AND {col} <= '{yr}-{me}-31'"
+
+    from datetime import date as dt, timedelta
+    today = dt.today()
+
+    if period == "this_year":
+        return f"{col} LIKE '{today.year}%'"
+    if period == "this_month":
+        return f"{col} LIKE '{today.year}-{today.month:02d}%'"
+    if period == "last_month":
+        first = today.replace(day=1)
+        lm = first - timedelta(days=1)
+        return f"{col} LIKE '{lm.year}-{lm.month:02d}%'"
+    if period == "last_7_days":
+        return f"{col} >= '{(today - timedelta(days=7)).isoformat()}'"
+    if period == "last_30_days":
+        return f"{col} >= '{(today - timedelta(days=30)).isoformat()}'"
+    if period == "last_90_days":
+        return f"{col} >= '{(today - timedelta(days=90)).isoformat()}'"
+
+    return ""
+
+
+def _build_city_filter(cities: List[str]) -> str:
+    if not cities:
+        return ""
+    quoted = ", ".join(f"'{c}'" for c in cities)
+    return f'dd."Source City" IN ({quoted})'
+
+
+def _add_filters_to_sql(sql: str, period_cond: str, city_cond: str) -> str:
+    """Append WHERE / AND conditions to an existing SQL string."""
+    conditions = [c for c in [period_cond, city_cond] if c]
+    if not conditions:
+        return sql
+    combined = " AND ".join(conditions)
+    sql_stripped = sql.rstrip().rstrip(";")
+    if re.search(r'\bWHERE\b', sql_stripped, re.IGNORECASE):
+        return sql_stripped + f"\n  AND {combined}"
+    return sql_stripped + f"\nWHERE {combined}"
+
+
+# ============================================================================
+# MAIN SQL AGENT
 # ============================================================================
 
 class SQLAgent:
     """
-    SQL Agent - Strict KPI-Driven SQL Generation
+    Two-Stage SQL Agent: NL → PQL → SQL
 
-    Flow:
-      1. Check if the metric maps to a cases-table KPI (exact pre-agg value).
-      2. Keyword match against KEYWORD_KPI_MAP.
-      3. Intent classifier fallback (only when confidence > 0.6).
-      4. Validate KPI exists in definitions/graph.
-      5. Generate SQL from dependency graph sql_logic (preferred) or PQL translation.
+    Stage 1: identify_kpi(query, intent) → kpi_name (from KEYWORD_KPI_MAP)
+    Stage 2: generate_sql(kpi_name, ...)  → verified PostgreSQL query
+
+    For cases-table KPIs: routes to `SELECT name, value FROM cases WHERE name = '...'`
+    For computed KPIs:    translates PQL from KPI_METADATA using PQLTranslator
     """
 
     def __init__(self, db: QueryRunner, max_iterations: int = 3):
-        self.db = db
+        self.db             = db
         self.max_iterations = max_iterations
-        self.kpi_defs = KPIDefinitions(KPI_DEFINITIONS_PATH)
-        self.kpi_graph = KPIDependencyGraph(KPI_GRAPH_PATH)
-        self.sql_gen = DeterministicSQLGenerator(self.kpi_defs, self.kpi_graph)
-        logger.info("SQLAgent initialized with strict KPI-driven mode")
+        self.kpi_defs       = KPIDefinitions(KPI_DEFINITIONS_PATH)
+        self.kpi_graph      = KPIDependencyGraph(KPI_GRAPH_PATH)
+        self.pql            = PQLTranslator()
+        logger.info("SQLAgent initialised — two-stage NL → PQL → SQL pipeline")
 
-    # ── KPI identification ──────────────────────────────────────────────────
+    # ── Stage 1: Natural Language → KPI name ────────────────────────────────
 
-    def _normalize(self, text: str) -> str:
+    @staticmethod
+    def _normalize(text: str) -> str:
         return text.lower().strip()
-
-    def _cases_kpi_for_metric(self, metric: str) -> Optional[str]:
-        """
-        Check whether a raw metric string (from the intent classifier) resolves
-        to a cases-table pre-aggregated KPI.
-
-        FIX: previously this mapping was incomplete and mapped 'otif' to
-        'Delivery on time %' which is semantically wrong — OTIF requires both
-        on-time AND in-full, whereas 'Delivery on time %' is on-time only.
-        """
-        CASES_METRIC_MAP: Dict[str, str] = {
-            # intent classifier metric strings -> exact cases.name values
-            "delivery_on_time":          "Delivery on time %",
-            "delivery on time":          "Delivery on time %",
-            "delivery on time %":        "Delivery on time %",
-            "avg_delay":                 "Avg. Delay days",
-            "avg_delay_duration":        "Avg. Delay days",
-            "avg. delay days":           "Avg. Delay days",
-            "delay days":                "Avg. Delay days",
-            "materials":                 "# Materials",
-            "# materials":               "# Materials",
-            "orders_at_risk":            "Orders At Risk",
-            "orders at risk %":          "Orders At Risk",
-            "delay_order_value":         "Delay Order Value(EUR)",
-            "delay order value":         "Delay Order Value(EUR)",
-            "packing_accuracy":          "Packing accuracy",
-            "packing accuracy":          "Packing accuracy",
-            "warehouse_issue":           "Warehouse Issue",
-            "shipment_affected":         "# Shipment Affected",
-            "# shipment affected":       "# Shipment Affected",
-            "value_at_risk":             "Value at Risk (EUR)",
-            "value at risk":             "Value at Risk (EUR)",
-            "savings_lost":              "Savings lost (EUR)",
-            "savings lost":              "Savings lost (EUR)",
-            "utilization_efficiency":    "Utilization Efficiency %",
-            "utilization efficiency":    "Utilization Efficiency %",
-            "utilization efficiency %":  "Utilization Efficiency %",
-            "warehouse":                 "#Warehouse",
-            "#warehouse":                "#Warehouse",
-            "total_operators":           "# Total Operators",
-            "# total operators":         "# Total Operators",
-        }
-        return CASES_METRIC_MAP.get(self._normalize(metric))
 
     def identify_kpi(self, query: str, intent: Dict) -> Tuple[Optional[str], float]:
         """
-        2-step KPI identification.
+        Stage 1: Map natural language → KPI name.
 
-        Step 1: Keyword match (longest match wins — iterate sorted by length desc).
-        Step 2: Intent classifier metric (only if confidence > 0.6).
+        Step A: Keyword match (longest phrase wins).
+        Step B: Intent classifier metric fallback (confidence ≥ 0.5).
         """
-        query_lower = self._normalize(query)
+        q_lower = self._normalize(query)
 
-        # Step 1: keyword match — sort by descending key length to prefer longer phrases
+        # Step A: keyword match
         for keyword in sorted(KEYWORD_KPI_MAP.keys(), key=len, reverse=True):
-            if keyword in query_lower:
+            if keyword in q_lower:
                 kpi_name = KEYWORD_KPI_MAP[keyword]
-                print(f"[DEBUG] Keyword match: '{keyword}' -> KPI: '{kpi_name}'")
+                logger.debug("KW match: '%s' → '%s'", keyword, kpi_name)
                 return kpi_name, 1.0
 
-        # Step 2: intent classifier
-        if intent.get('metric') and intent.get('confidence', 0) > 0.6:
-            metric = intent['metric']
-            metric_title = metric.replace('_', ' ').title()
-            if self.kpi_defs.exists(metric_title):
-                print(f"[DEBUG] Intent match: '{metric}' -> KPI: '{metric_title}'")
-                return metric_title, intent['confidence']
+        # Step B: intent classifier fallback
+        metric = intent.get('metric')
+        if metric:
+            phrase = self._normalize(metric).replace('_', ' ')
+            for keyword in sorted(KEYWORD_KPI_MAP.keys(), key=len, reverse=True):
+                if keyword in phrase or phrase in keyword:
+                    conf = intent.get('confidence', 0.5)
+                    if conf >= 0.5:
+                        kpi_name = KEYWORD_KPI_MAP[keyword]
+                        logger.debug("Intent fallback: '%s' → '%s'", metric, kpi_name)
+                        return kpi_name, conf
 
-        print(f"[DEBUG] KPI NOT FOUND for query: '{query}'")
+        logger.debug("KPI not found for query: '%s'", query)
         return None, 0.0
 
-    # ── SQL generation ──────────────────────────────────────────────────────
+    # ── Stage 2: PQL → SQL ──────────────────────────────────────────────────
 
-    def generate(self, intent: Dict, original_query: str) -> str:
-        print(f"[DEBUG] Query: {original_query}")
-        print(f"[DEBUG] Intent: {intent}")
-
-        # Priority: check if intent metric maps to a cases-table pre-agg KPI
-        if intent.get('metric'):
-            cases_kpi = self._cases_kpi_for_metric(intent['metric'])
-            if cases_kpi:
-                print(f"[DEBUG] Using cases table for '{intent['metric']}' -> '{cases_kpi}'")
-                return self._generate_cases_query(cases_kpi)
-
-        # Standard KPI identification
-        kpi_name, confidence = self.identify_kpi(original_query, intent)
-
-        if not kpi_name:
-            available = self.kpi_defs.all_names()
-            raise ValueError(
-                f"KPI NOT FOUND for query: '{original_query}'. "
-                f"Available KPIs: {', '.join(available[:10])}..."
-            )
-
-        if not self.kpi_defs.exists(kpi_name) and kpi_name not in self.kpi_graph.graph:
-            raise ValueError(f"KPI '{kpi_name}' not found in definitions or dependency graph")
-
-        print(f"[DEBUG] KPI: {kpi_name}")
-
-        # If this KPI is a cases-table KPI, route directly
-        if self.kpi_graph.is_cases_kpi(kpi_name):
-            print(f"[DEBUG] KPI '{kpi_name}' resolved to cases table — routing directly")
-            return self._generate_cases_query(kpi_name)
-
-        deps = self.kpi_graph.get_dependencies(kpi_name)
-        if deps:
-            print(f"[DEBUG] Dependencies: {', '.join(deps)}")
-
-        filters = {
-            'period':  intent.get('period'),
-            'cities':  intent.get('cities', []),
-            'regions': intent.get('regions', [])
-        }
-
-        sql = self.sql_gen.build_sql(kpi_name, original_query, filters)
-        print(f"[DEBUG] SQL: {sql}")
-        return sql
-
-    def _generate_cases_query(self, kpi_name: str) -> str:
-        """
-        Generate a query against the cases table.
-
-        FIX: original code queried columns 'kpi_name' and 'kpi_value' which do
-        not exist.  The actual schema is: id, created_at, name, value.
-        """
-        # Escape single quotes in kpi_name for safety
-        safe_name = kpi_name.replace("'", "''")
+    def _generate_cases_query(self, cases_name: str) -> str:
+        """Route to the cases table (Tier 1 — exact ARIS values)."""
+        safe = cases_name.replace("'", "''")
         return (
+            f"-- PQL Tier 1: pre-aggregated ARIS value from cases table\n"
             f"SELECT\n"
-            f"    name AS kpi_name,\n"
-            f"    value AS kpi_value,\n"
-            f"    created_at\n"
+            f"  name  AS kpi_name,\n"
+            f"  value AS kpi_value\n"
             f"FROM cases\n"
-            f"WHERE name = '{safe_name}'\n"
-            f"ORDER BY created_at DESC\n"
+            f"WHERE name = '{safe}'\n"
             f"LIMIT 1"
         )
 
-    # ── SQL refinement (error recovery) ────────────────────────────────────
+    def _generate_computed_query(
+        self,
+        kpi_name:    str,
+        meta:        Dict,
+        period_cond: str,
+        city_cond:   str,
+    ) -> str:
+        """
+        Route to Tier 2 — translate PQL to SQL for computed KPIs.
+
+        Uses KPI_METADATA for the PQL expression, aggregation type,
+        and source tables.  Applies date/city filters where applicable.
+        """
+        # Special case: full custom FROM clause provided
+        if "pql_override" in meta and "from" in meta:
+            sql = f"-- PQL Tier 2: computed KPI — {kpi_name}\nSELECT\n  {meta['pql_override']}\n{meta['from']}"
+            return _add_filters_to_sql(sql, period_cond, city_cond)
+
+        # Standard PQL translation
+        pql_expr   = meta.get("pql") or self.kpi_defs.get_pql(kpi_name) or ""
+        agg        = meta.get("agg", "SUM")
+        tables     = meta.get("tables", [])
+        label      = meta.get("label", "result")
+
+        if not pql_expr:
+            raise RuntimeError(
+                f"No PQL logic found for KPI '{kpi_name}'. "
+                f"Add it to KPI_METADATA or kpi_definitions.csv."
+            )
+
+        # Translate PQL and build SELECT
+        sql_expr            = self.pql.translate_expr(pql_expr)
+        from_clause, b_alias = self.pql.build_from_clause(tables)
+
+        if agg == "SUM":
+            select_expr = f"SUM({sql_expr}) AS {label},\n  COUNT(*) AS total_orders"
+        elif agg == "AVG":
+            select_expr = f"CAST(AVG({sql_expr}) AS NUMERIC(10,4)) AS {label},\n  COUNT(*) AS total_orders"
+        elif agg == "RATE":
+            select_expr = (
+                f"CAST(100.0 * SUM({sql_expr}) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS {label},\n"
+                f"  COUNT(*) AS total_orders"
+            )
+        elif agg == "MEDIAN":
+            select_expr = f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {sql_expr}) AS {label}"
+        else:  # NONE
+            select_expr = f"{sql_expr} AS {label}"
+
+        parts = [
+            f"-- PQL Tier 2: computed KPI — {kpi_name}",
+            "SELECT",
+            f"  {select_expr}",
+            from_clause,
+        ]
+
+        where_parts = [p for p in [period_cond, city_cond] if p]
+        if where_parts:
+            parts.append("WHERE " + "\n  AND ".join(where_parts))
+
+        return "\n".join(parts)
+
+    # ── Public API ──────────────────────────────────────────────────────────
+
+    def generate(self, intent: Dict, original_query: str) -> str:
+        """
+        Full two-stage pipeline: NL → KPI → (PQL) → SQL.
+
+        Returns a PostgreSQL SELECT statement ready for execution.
+
+        Raises:
+            ValueError   if KPI cannot be identified.
+            RuntimeError if no SQL can be generated for the KPI.
+        """
+        logger.info("SQLAgent.generate | query: '%s'", original_query)
+
+        # ── Stage 1: NL → KPI ────────────────────────────────────────────
+        kpi_name, confidence = self.identify_kpi(original_query, intent)
+
+        if not kpi_name:
+            supported = sorted(set(KEYWORD_KPI_MAP.values()))
+            raise ValueError(
+                f"Cannot identify KPI from: '{original_query}'.\n"
+                f"Supported KPIs: {', '.join(supported)}"
+            )
+        logger.info("KPI: '%s' (conf=%.2f)", kpi_name, confidence)
+
+        # ── Resolve canonical name (aliases) ─────────────────────────────
+        meta = KPI_METADATA.get(kpi_name)
+        if meta is None:
+            # Try to find via CASES_TABLE_MAP
+            if kpi_name in CASES_TABLE_MAP:
+                cases_name = CASES_TABLE_MAP[kpi_name]
+                meta = {"tier": "cases"}
+            else:
+                raise RuntimeError(
+                    f"KPI '{kpi_name}' not found in KPI_METADATA. "
+                    f"Add it to KPI_METADATA in sql_agent.py."
+                )
+
+        # ── Build filter conditions ───────────────────────────────────────
+        period     = intent.get('period')
+        cities     = intent.get('cities') or intent.get('filters', {}).get('cities', [])
+        period_cond = _build_period_filter(period) if period else ""
+        city_cond   = _build_city_filter(cities)   if cities  else ""
+
+        # ── Stage 2: PQL → SQL ────────────────────────────────────────────
+        tier = meta.get("tier", "computed")
+
+        if tier == "cases":
+            cases_name = meta.get("cases_name") or CASES_TABLE_MAP.get(kpi_name) or kpi_name
+            sql = self._generate_cases_query(cases_name)
+            # Note: cases table filters are not applicable (pre-aggregated)
+            if period_cond:
+                sql += f"\n-- Note: period filter '{period}' not applied — value is pre-aggregated"
+        else:
+            sql = self._generate_computed_query(kpi_name, meta, period_cond, city_cond)
+
+        logger.info("Generated SQL:\n%s", sql)
+        return sql
 
     def refine(self, failed_sql: str, error: str, intent: Dict, original_query: str) -> str:
-        """Attempt to fix common SQL errors without LLM involvement."""
-        print(f"[DEBUG] SQL execution failed: {error}")
-        print(f"[DEBUG] Failed SQL: {failed_sql}")
-
+        """
+        Attempt to auto-fix a SQL execution error.
+        Most errors with this pipeline indicate a metadata issue — log clearly.
+        """
+        logger.warning("SQL failed: %s\nSQL:\n%s", error, failed_sql)
         error_lower = error.lower()
 
         if "column" in error_lower and "does not exist" in error_lower:
-            fixed = failed_sql.replace('"."', '.')
-            print("[DEBUG] Attempting fix: removing incorrect quoting")
-            return fixed
-
-        if "relation" in error_lower and "does not exist" in error_lower:
-            raise RuntimeError(f"Table not found. SQL cannot be fixed automatically. Error: {error}")
-
-        if "missing from-clause" in error_lower:
+            col_m = re.search(r'column "([^"]+)" does not exist', error)
+            hint  = f" ('{col_m.group(1)}')" if col_m else ""
             raise RuntimeError(
-                f"Alias not found in FROM clause. "
-                f"This usually means the sql_logic in kpi_dependency_graph.json "
-                f"references a table alias that is not joined. Error: {error}"
+                f"Column{hint} not found. Check KPI_METADATA pql / tables in sql_agent.py. "
+                f"Error: {error}"
             )
-
-        raise RuntimeError(f"SQL Agent cannot fix this error: {error}")
+        if "relation" in error_lower and "does not exist" in error_lower:
+            tbl_m = re.search(r'relation "([^"]+)" does not exist', error)
+            hint  = f" (table '{tbl_m.group(1)}')" if tbl_m else ""
+            raise RuntimeError(
+                f"Table{hint} not found. Verify Supabase table names. Error: {error}"
+            )
+        raise RuntimeError(f"SQL Agent cannot auto-fix: {error}")

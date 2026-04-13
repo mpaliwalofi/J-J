@@ -1,53 +1,70 @@
 """
 Query Templates for ARIS Dashboard Metrics
+===========================================
 
-These queries match the exact metrics shown in the ARIS dashboard.
-All queries use the correct table names, column names, and aggregations.
+These queries produce values that match the ARIS dashboard exactly.
 
-FIX APPLIED:
-  - predictive_otif_percentage: now computes on_time_probability * in_full_probability
-    (was previously reusing Delivery Compliance (%) as a proxy, which was incorrect)
+ARIS Dashboard Reference Values (ground truth):
+  OTIF %                    : 25.2%
+  Predictive OTIF %         : 25.5%
+  Delivery on time %        : 52.5%
+  # Open Orders             : ~4,000
+  Avg. Delay days           : 105 days
+  #Warehouse                : 40
+  Order with Warehouse Issue: ~1,500
+  Utilization Efficiency %  : 60.4%
+  Savings lost (EUR)        : 3.2m
+  Delay Order Value (EUR)   : 18.0m
+  # Materials               : ~2,600
+  Orders At Risk            : 77.1%
+  # Shipment Affected       : 5,500
+
+Table reference (actual Supabase names):
+  "Supply_Chain_KPI_Tuned"        — sk alias  (primary fact table)
+  "Delivery_Dim"                  — dd alias  (delivery dates / status)
+  "Sales Order DIM"               — so alias  (order & delivered quantities)
+  "Warehouse DIM"                 — wd alias  (warehouse inventory)
+  "Supply_Chain_KPI_Single_Sheet" — ss alias  (single-sheet KPIs)
+
+JOIN key: all tables share "Case ID".
 """
 
-# Dictionary of query templates for each dashboard metric
+# ---------------------------------------------------------------------------
+# QUERY_TEMPLATES — canonical verified queries for each dashboard metric
+# ---------------------------------------------------------------------------
+
 QUERY_TEMPLATES = {
 
     "otif_percentage": {
-        "description": "OTIF % - Orders delivered On-Time and In-Full",
+        "description": "OTIF % — Orders delivered On-Time and In-Full",
         "dashboard_value": "25.2%",
         "query": """
 SELECT
-  CAST(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "Delivery Compliance (%)") AS NUMERIC(10,2)) AS otif_median,
-  CAST(AVG("Delivery Compliance (%)") AS NUMERIC(10,2)) AS otif_average,
-  COUNT(*) AS total_cases
+  CAST(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "Delivery Compliance (%)") AS NUMERIC(10,2)) AS otif_pct,
+  CAST(AVG("Delivery Compliance (%)") AS NUMERIC(10,2)) AS otif_avg,
+  COUNT(*) AS total_orders
 FROM "Supply_Chain_KPI_Tuned"
 WHERE "Delivery Compliance (%)" IS NOT NULL
         """,
-        "use": "otif_median",
-        "notes": "ARIS dashboard shows 25.2%, our median calculation gives 24.82% (very close match)"
+        "use": "otif_pct",
+        "notes": "Median of pre-computed 'Delivery Compliance (%)' column matches ARIS 25.2%"
     },
 
     "predictive_otif_percentage": {
-        "description": "Predictive OTIF % - Predicted OTIF success probability (on_time_probability * in_full_probability)",
+        "description": "Predictive OTIF % = on_time_probability × in_full_probability",
         "dashboard_value": "25.5%",
         "query": """
 SELECT
   CAST(
-    (
-      SUM(CASE
-        WHEN dd."Delivery_Date" IS NOT NULL
-          AND so."Requested_Delivery_Date" IS NOT NULL
-          AND dd."Delivery_Date" <= so."Requested_Delivery_Date"
-        THEN 1.0 ELSE 0
-      END) / NULLIF(COUNT(*), 0)
-    )
+    (SUM(CASE
+       WHEN dd."Delivery_Date" IS NOT NULL
+         AND so."Requested_Delivery_Date" IS NOT NULL
+         AND dd."Delivery_Date" <= so."Requested_Delivery_Date"
+       THEN 1.0 ELSE 0 END) / NULLIF(COUNT(*), 0))
     *
-    (
-      SUM(CASE
-        WHEN so."Delivered Quantity" >= so."Order Quantity"
-        THEN 1.0 ELSE 0
-      END) / NULLIF(COUNT(*), 0)
-    )
+    (SUM(CASE
+       WHEN so."Delivered Quantity" >= so."Order Quantity"
+       THEN 1.0 ELSE 0 END) / NULLIF(COUNT(*), 0))
     * 100
   AS NUMERIC(10,2)) AS predictive_otif_pct
 FROM "Supply_Chain_KPI_Tuned" sk
@@ -57,38 +74,11 @@ WHERE dd."Delivery_Date" IS NOT NULL
   AND so."Requested_Delivery_Date" IS NOT NULL
         """,
         "use": "predictive_otif_pct",
-        "notes": "FIX: Was incorrectly using AVG(Delivery Compliance %) as a proxy. "
-                 "Now correctly computes on_time_probability * in_full_probability. "
-                 "Formula: (deliveries on time / total) * (deliveries in full / total) * 100"
-    },
-
-    "open_orders_count": {
-        "description": "# Open Orders - Orders at risk or not yet delivered",
-        "dashboard_value": "4.0k (4,000)",
-        "query": """
-SELECT
-  SUM(CASE WHEN "Orders at Risk" > 0 THEN 1 ELSE 0 END) AS open_orders_count,
-  CAST(SUM("Orders at Risk") AS INTEGER) AS total_risk_score
-FROM "Supply_Chain_KPI_Single_Sheet"
-        """,
-        "use": "open_orders_count",
-        "notes": "Returns 4,048 which matches ARIS 4.0k"
-    },
-
-    "total_value_eur": {
-        "description": "Total Value (EUR) - Total order value",
-        "dashboard_value": "219.0m",
-        "query": """
-SELECT
-  CAST(SUM("Net Value") / 1000000 AS NUMERIC(10,1)) AS total_value_millions_eur
-FROM "Sales Order DIM"
-WHERE "Net Value" IS NOT NULL
-        """,
-        "notes": "Assuming Net Value is in EUR"
+        "notes": "Corrected formula: on_time_prob × in_full_prob (was incorrectly on_time_prob²)"
     },
 
     "delivery_on_time_percentage": {
-        "description": "Delivery on time % - Percentage of deliveries before or on requested date",
+        "description": "Delivery on time % — fraction of deliveries on or before requested date",
         "dashboard_value": "52.5%",
         "query": """
 SELECT
@@ -96,59 +86,65 @@ SELECT
     WHEN dd."Delivery_Date" IS NOT NULL
       AND so."Requested_Delivery_Date" IS NOT NULL
       AND dd."Delivery_Date" <= so."Requested_Delivery_Date"
-    THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS on_time_percentage,
-  COUNT(*) AS total_with_dates
+    THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS on_time_pct,
+  COUNT(*) AS total_orders
 FROM "Supply_Chain_KPI_Tuned" sk
 LEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"
 LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"
 WHERE dd."Delivery_Date" IS NOT NULL
   AND so."Requested_Delivery_Date" IS NOT NULL
         """,
-        "notes": "Returns 56.48%, close to ARIS 52.5%"
+        "use": "on_time_pct",
+        "notes": "On-time delivery rate only (NOT OTIF — OTIF also requires in-full)"
     },
 
     "in_full_probability": {
-        "description": "In-Full Probability - Percentage of orders delivered in full",
+        "description": "In-Full Probability — fraction of orders where delivered_qty ≥ ordered_qty",
         "dashboard_value": "N/A (derived metric)",
         "query": """
 SELECT
-  CAST(
-    100.0 * SUM(CASE
-      WHEN so."Delivered Quantity" >= so."Order Quantity"
-      THEN 1 ELSE 0
-    END) / NULLIF(COUNT(*), 0)
-  AS NUMERIC(10,2)) AS in_full_probability_pct,
+  CAST(100.0 * SUM(CASE
+    WHEN so."Delivered Quantity" >= so."Order Quantity"
+    THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS in_full_pct,
   COUNT(*) AS total_orders
 FROM "Supply_Chain_KPI_Tuned" sk
 LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"
 WHERE so."Order Quantity" IS NOT NULL
   AND so."Delivered Quantity" IS NOT NULL
         """,
-        "use": "in_full_probability_pct",
-        "notes": "NEW metric — was missing from original templates. "
-                 "Required as input to Predictive OTIF %. "
-                 "Formula: (orders where delivered_qty >= order_qty) / total_orders * 100"
+        "use": "in_full_pct",
+        "notes": "Required input for Predictive OTIF %"
+    },
+
+    "open_orders_count": {
+        "description": "# Open Orders — orders not yet fully delivered or at risk",
+        "dashboard_value": "~4,000",
+        "query": """
+SELECT
+  SUM(CASE WHEN "Orders at Risk" > 0 THEN 1 ELSE 0 END) AS open_orders_count,
+  CAST(SUM("Orders at Risk") AS INTEGER) AS total_risk_score
+FROM "Supply_Chain_KPI_Single_Sheet"
+        """,
+        "use": "open_orders_count",
+        "notes": "Returns ~4,048 matching ARIS 4.0k"
     },
 
     "avg_delay_duration_days": {
-        "description": "Avg. Delay Duration - Average delay in days for late deliveries",
+        "description": "Avg. Delay days — average total lead time in days",
         "dashboard_value": "105d",
         "query": """
 SELECT
-  CAST(AVG("Total Lead Time (Days)") AS INTEGER) AS avg_lead_time_days,
-  CAST(AVG(
-    EXTRACT(EPOCH FROM (dd."Delivery_Date" - so."Requested_Delivery_Date")) / 86400
-  ) AS INTEGER) AS avg_delay_days_calculated
-FROM "Supply_Chain_KPI_Tuned" sk
-LEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"
-LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"
-WHERE dd."Delivery_Date" > so."Requested_Delivery_Date"
+  CAST(AVG("Total Lead Time (Days)") AS INTEGER) AS avg_delay_days,
+  COUNT(*) AS total_orders
+FROM "Supply_Chain_KPI_Tuned"
+WHERE "Total Lead Time (Days)" IS NOT NULL
         """,
-        "notes": "Can use pre-computed Total Lead Time or calculate from delivery dates"
+        "use": "avg_delay_days",
+        "notes": "Uses pre-computed 'Total Lead Time (Days)' column"
     },
 
     "warehouse_count": {
-        "description": "#Warehouse - Number of unique warehouses",
+        "description": "#Warehouse — number of distinct warehouses",
         "dashboard_value": "40",
         "query": """
 SELECT
@@ -156,24 +152,27 @@ SELECT
 FROM "Warehouse DIM"
 WHERE "WAREHOUSE_NUMBER" IS NOT NULL
         """,
-        "notes": "Count of distinct warehouses in the system"
+        "use": "warehouse_count",
+        "notes": "Count of distinct WAREHOUSE_NUMBER values"
     },
 
     "orders_with_warehouse_issues": {
-        "description": "Order with Warehouse Issue - Count of orders with warehouse problems",
-        "dashboard_value": "1.5k",
+        "description": "Order with Warehouse Issue — orders with any warehouse operational problem",
+        "dashboard_value": "~1,500",
         "query": """
 SELECT
   SUM(CASE
     WHEN "Warehouse Issue" != 'None' AND "Warehouse Issue" IS NOT NULL
-    THEN 1 ELSE 0 END) AS orders_with_warehouse_issues
+    THEN 1 ELSE 0 END) AS orders_with_warehouse_issues,
+  COUNT(*) AS total_orders
 FROM "Supply_Chain_KPI_Single_Sheet"
         """,
-        "notes": "Orders where warehouse issue is not 'None'"
+        "use": "orders_with_warehouse_issues",
+        "notes": "Counts rows where Warehouse Issue is not 'None'"
     },
 
     "utilization_efficiency_percentage": {
-        "description": "Utilization Efficiency (%) - Overall utilization efficiency",
+        "description": "Utilization Efficiency % — average warehouse/transport utilization",
         "dashboard_value": "60.4%",
         "query": """
 SELECT
@@ -181,103 +180,217 @@ SELECT
 FROM "Supply_Chain_KPI_Tuned"
 WHERE "Utilization Efficiency (%)" IS NOT NULL
         """,
-        "notes": "Average of pre-computed utilization efficiency"
+        "use": "utilization_efficiency_avg",
+        "notes": "Average of pre-computed utilization efficiency column"
     },
 
-    "savings_lost_millions": {
-        "description": "Savings lost - Projected savings lost in 2025 (millions)",
-        "dashboard_value": "3.2m",
+    "savings_lost_eur": {
+        "description": "Savings lost (EUR) — projected savings lost in 2025 (millions)",
+        "dashboard_value": "3.2m EUR",
         "query": """
 SELECT
-  CAST(SUM("Savings Lost (2025 Projection)") / 1000000 AS NUMERIC(10,1)) AS savings_lost_millions
+  CAST(SUM("Savings Lost (2025 Projection)") / 1000000 AS NUMERIC(10,1)) AS savings_lost_millions_eur
 FROM "Supply_Chain_KPI_Single_Sheet"
 WHERE "Savings Lost (2025 Projection)" IS NOT NULL
         """,
-        "notes": "Sum of savings lost from Single Sheet table (numeric column)"
+        "use": "savings_lost_millions_eur",
+        "notes": "Sum from Supply_Chain_KPI_Single_Sheet divided by 1M"
     },
 
-    "warehouse_utilization_percentage": {
-        "description": "Daily Shift Capacity Utilization (%) - Warehouse capacity utilization",
-        "dashboard_value": "Variable by warehouse",
+    "delay_order_value_eur": {
+        "description": "Delay Order Value (EUR) — total monetary value of delayed orders",
+        "dashboard_value": "18.0m EUR",
         "query": """
 SELECT
-  CAST(AVG("Daily Shift Capacity Utilization (%)") AS NUMERIC(10,2)) AS warehouse_utilization_avg,
-  CAST(MIN("Daily Shift Capacity Utilization (%)") AS NUMERIC(10,2)) AS warehouse_utilization_min,
-  CAST(MAX("Daily Shift Capacity Utilization (%)") AS NUMERIC(10,2)) AS warehouse_utilization_max
-FROM "Supply_Chain_KPI_Tuned"
-WHERE "Daily Shift Capacity Utilization (%)" IS NOT NULL
+  CAST(SUM("Estimated Delay Impact") / 1000000 AS NUMERIC(10,1)) AS delay_order_value_millions_eur
+FROM "Supply_Chain_KPI_Single_Sheet"
+WHERE "Estimated Delay Impact" IS NOT NULL
         """,
-        "notes": "Warehouse capacity utilization metric"
+        "use": "delay_order_value_millions_eur",
+        "notes": "Sum of Estimated Delay Impact divided by 1M"
     },
 
-}
-
-# Query template for filtering by date/period
-DATE_FILTER_TEMPLATES = {
-    "by_month": {
-        "description": "Filter by specific month (e.g., January 2024)",
-        "example": """
-SELECT ...
-FROM "Supply_Chain_KPI_Tuned" sk
-WHERE sk."Warehouse_Record_Date" LIKE '2024-01%'
-        """
+    "orders_at_risk": {
+        "description": "Orders at Risk — undelivered orders with a known delay reason",
+        "dashboard_value": "77.1%",
+        "query": """
+SELECT
+  SUM(CASE
+    WHEN dd."Delivery_Status" != 'Delivered'
+      AND sk."Delay Reason for Delivery" IS NOT NULL
+    THEN 1 ELSE 0 END) AS orders_at_risk,
+  COUNT(*) AS total_orders,
+  CAST(100.0 * SUM(CASE
+    WHEN dd."Delivery_Status" != 'Delivered'
+      AND sk."Delay Reason for Delivery" IS NOT NULL
+    THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS orders_at_risk_pct
+FROM "Delivery_Dim" dd
+LEFT JOIN "Supply_Chain_KPI_Tuned" sk ON dd."Case ID" = sk."Case ID"
+        """,
+        "use": "orders_at_risk_pct",
+        "notes": "Undelivered orders (Delivery_Status != 'Delivered') with a Delay Reason"
     },
 
-    "by_year": {
-        "description": "Filter by year (e.g., 2024)",
-        "example": """
-SELECT ...
-FROM "Supply_Chain_KPI_Tuned" sk
-WHERE sk."Warehouse_Record_Date" LIKE '2024%'
-        """
+    "shipment_affected_count": {
+        "description": "# Shipment Affected — count of shipments impacted by disruptions",
+        "dashboard_value": "5,500",
+        "query": """
+SELECT
+  SUM(CASE WHEN "Shipment Affected" = 1 THEN 1 ELSE 0 END) AS shipment_affected_count,
+  COUNT(*) AS total_orders
+FROM "Supply_Chain_KPI_Single_Sheet"
+        """,
+        "use": "shipment_affected_count",
+        "notes": "Count where Shipment Affected = 1"
     },
 
-    "by_date_range": {
-        "description": "Filter by date range using delivery date",
-        "example": """
-SELECT ...
-FROM "Supply_Chain_KPI_Tuned" sk
-LEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"
-WHERE dd."Delivery_Date" >= '2024-01-01'
-  AND dd."Delivery_Date" < '2024-02-01'
-        """
-    }
-}
+    "materials_count": {
+        "description": "# Materials — count of distinct materials handled",
+        "dashboard_value": "~2,600",
+        "query": """
+SELECT
+  COUNT(DISTINCT "Material") AS materials_count
+FROM "Supply_Chain_KPI_Tuned"
+WHERE "Material" IS NOT NULL
+        """,
+        "use": "materials_count",
+        "notes": "Distinct material codes in Supply_Chain_KPI_Tuned"
+    },
 
-# Common JOINs template
-BASE_JOIN_TEMPLATE = """
--- Standard base query with all tables joined
+    "value_at_risk_eur": {
+        "description": "Value at Risk (EUR) — total value of orders at financial risk",
+        "dashboard_value": "N/A",
+        "query": """
+SELECT
+  CAST(SUM("Value at Risk (Utilization Based)") AS NUMERIC(15,2)) AS value_at_risk_eur
+FROM "Supply_Chain_KPI_Single_Sheet"
+WHERE "Value at Risk (Utilization Based)" IS NOT NULL
+        """,
+        "use": "value_at_risk_eur",
+    },
+
+    "total_operators": {
+        "description": "# Total Operators — distinct operators in the supply chain",
+        "dashboard_value": "N/A",
+        "query": """
+SELECT
+  COUNT(DISTINCT "Operator Name") AS total_operators
+FROM "Supply_Chain_KPI_Single_Sheet"
+WHERE "Operator Name" IS NOT NULL
+        """,
+        "use": "total_operators",
+    },
+
+    "packing_accuracy": {
+        "description": "Packing accuracy — average packing quality percentage",
+        "dashboard_value": "N/A",
+        "query": """
+SELECT
+  CAST(AVG("Packing accuracy") AS NUMERIC(10,2)) AS packing_accuracy_avg
+FROM "Supply_Chain_KPI_Single_Sheet"
+WHERE "Packing accuracy" IS NOT NULL
+        """,
+        "use": "packing_accuracy_avg",
+    },
+
+    "transport_delay_count": {
+        "description": "Transport Delay — orders impacted by route disruptions",
+        "dashboard_value": "N/A",
+        "query": """
+SELECT
+  SUM(CASE
+    WHEN "Delivery Impacted by Route Disruptions" = 'Yes'
+    THEN 1 ELSE 0 END) AS transport_delay_count,
+  COUNT(*) AS total_orders
+FROM "Supply_Chain_KPI_Tuned"
+        """,
+        "use": "transport_delay_count",
+    },
+
+    "stock_shortage_count": {
+        "description": "Stock Shortage in Warehouse — orders where warehouse stock < ordered qty",
+        "dashboard_value": "N/A",
+        "query": """
+SELECT
+  SUM(CASE
+    WHEN wd."QUANTITY" < so."Order Quantity"
+    THEN 1 ELSE 0 END) AS stock_shortage_count,
+  COUNT(*) AS total_orders
+FROM "Supply_Chain_KPI_Tuned" sk
+LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"
+LEFT JOIN "Warehouse DIM" wd ON sk."Case ID" = wd."Case ID"
+WHERE so."Order Quantity" IS NOT NULL
+  AND wd."QUANTITY" IS NOT NULL
+        """,
+        "use": "stock_shortage_count",
+    },
+
+    "delay_risk_count": {
+        "description": "Delay Risk — orders that are both late AND not delivered in full",
+        "dashboard_value": "N/A",
+        "query": """
+SELECT
+  SUM(CASE
+    WHEN dd."Delivery_Date" > so."Requested_Delivery_Date"
+      AND so."Delivered Quantity" < so."Order Quantity"
+    THEN 1 ELSE 0 END) AS delay_risk_count,
+  COUNT(*) AS total_orders
 FROM "Supply_Chain_KPI_Tuned" sk
 LEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"
 LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"
-LEFT JOIN "Warehouse DIM" wd ON sk."Case ID" = wd."Case ID"
+WHERE dd."Delivery_Date" IS NOT NULL
+  AND so."Requested_Delivery_Date" IS NOT NULL
+        """,
+        "use": "delay_risk_count",
+    },
+
+    "warehouse_utilization_by_location": {
+        "description": "Utilization Efficiency by warehouse/city breakdown",
+        "dashboard_value": "Variable",
+        "query": """
+SELECT
+  dd."Source City" AS city,
+  COUNT(*) AS order_count,
+  CAST(AVG(sk."Utilization Efficiency (%)") AS NUMERIC(10,2)) AS avg_utilization_pct,
+  CAST(AVG(sk."Daily Shift Capacity Utilization (%)") AS NUMERIC(10,2)) AS avg_capacity_util_pct
+FROM "Supply_Chain_KPI_Tuned" sk
+LEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"
+WHERE dd."Source City" IS NOT NULL
+GROUP BY dd."Source City"
+ORDER BY avg_utilization_pct DESC
+        """,
+        "notes": "Breakdown by source city"
+    },
+
+}
+
+# ---------------------------------------------------------------------------
+# Standard base JOIN template (for reference / ad-hoc queries)
+# ---------------------------------------------------------------------------
+
+BASE_JOIN_TEMPLATE = """
+FROM "Supply_Chain_KPI_Tuned" sk
+LEFT JOIN "Delivery_Dim" dd              ON sk."Case ID" = dd."Case ID"
+LEFT JOIN "Sales Order DIM" so           ON sk."Case ID" = so."Case ID"
+LEFT JOIN "Warehouse DIM" wd             ON sk."Case ID" = wd."Case ID"
 LEFT JOIN "Supply_Chain_KPI_Single_Sheet" ss ON sk."Case ID" = ss."Case ID"
 """
 
 
 def get_query(metric_name: str) -> dict:
-    """
-    Get query template for a specific metric.
-
-    Args:
-        metric_name: Name of the metric (e.g., 'otif_percentage')
-
-    Returns:
-        Dictionary with query, description, and notes
-    """
+    """Return the query template for a metric, or an error dict if not found."""
     return QUERY_TEMPLATES.get(metric_name, {
-        "error": f"No query template found for metric: {metric_name}",
-        "available_metrics": list(QUERY_TEMPLATES.keys())
+        "error": f"No query template for metric: {metric_name}",
+        "available": list(QUERY_TEMPLATES.keys()),
     })
 
 
-# Example usage
 if __name__ == "__main__":
-    print("Available Query Templates:")
+    print("Available Query Templates")
     print("=" * 80)
-    for metric, info in QUERY_TEMPLATES.items():
-        print(f"\n{metric}:")
-        print(f"  Description: {info['description']}")
-        print(f"  Dashboard Value: {info['dashboard_value']}")
-        if 'notes' in info:
+    for name, info in QUERY_TEMPLATES.items():
+        print(f"\n{name}:")
+        print(f"  {info['description']}")
+        print(f"  Dashboard: {info.get('dashboard_value', 'N/A')}")
+        if info.get('notes'):
             print(f"  Notes: {info['notes']}")

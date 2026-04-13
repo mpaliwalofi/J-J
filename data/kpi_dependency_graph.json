@@ -1,535 +1,970 @@
 {
-  "metadata": {
-    "total_kpis": 34,
-    "total_layers": 5,
-    "source_file": "kpi_definitions.csv",
-    "generated_at": "2026-04-13T00:00:00Z",
-    "actual_database_tables": [
-      "Sales Order DIM",
-      "cases",
-      "Warehouse DIM",
-      "Delivery_Dim",
-      "Supply_Chain_KPI_Tuned"
+  "topological_sort": {
+    "description": "Bottom-to-top ordering: Level 0 = raw source columns, higher levels = derived/aggregated KPIs. Each node only depends on nodes in lower levels.",
+    "levels": [
+      {
+        "level": 0,
+        "label": "Raw Sources (Table Columns)",
+        "nodes": [
+          {
+            "id": "Actual_Delivery_Date",
+            "label": "Actual Delivery Date",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "On_Time",
+              "Avg_Delay_Duration",
+              "Delay_Risk",
+              "OTIF"
+            ],
+            "source_table": "Delivery_Dim",
+            "source_column": "Delivery_Date"
+          },
+          {
+            "id": "Avg_Delay_Duration_ms",
+            "label": "Avg delay duration (ms)",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Avg_Days_Delay_Duration",
+              "Avg_Delay_Days_Dashboard"
+            ],
+            "source_table": "_ARIS.Case",
+            "source_column": "Avg delay duration"
+          },
+          {
+            "id": "Cases_Table",
+            "label": "ARIS Cases Table (pre-aggregated)",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Open_Orders",
+              "Num_Warehouse",
+              "Orders_At_Risk_Dashboard",
+              "Delay_Order_Value",
+              "Packing_Accuracy",
+              "Num_Shipment_Affected",
+              "Value_at_Risk",
+              "Savings_Lost",
+              "Utilization_Efficiency",
+              "Num_Materials",
+              "Num_Total_Operators"
+            ],
+            "source_table": "cases",
+            "source_column": "value"
+          },
+          {
+            "id": "City",
+            "label": "City",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [],
+            "source_table": "Delivery_Dim",
+            "source_column": "Source City"
+          },
+          {
+            "id": "Delay_Reason",
+            "label": "Delay Reason for Delivery",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Orders_at_Risk"
+            ],
+            "source_table": "Supply_Chain_KPI_Tuned",
+            "source_column": "Delay Reason for Delivery"
+          },
+          {
+            "id": "Delivered_Quantity",
+            "label": "Delivered Quantity",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "InFull",
+              "Delay_Risk",
+              "OTIF"
+            ],
+            "source_table": "Sales Order DIM",
+            "source_column": "Delivered Quantity"
+          },
+          {
+            "id": "Delivery_Number",
+            "label": "Delivery Number",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Delivery_On_Time_Pct"
+            ],
+            "source_table": "Delivery_Dim",
+            "source_column": "Delivery Number"
+          },
+          {
+            "id": "Delivery_Status",
+            "label": "Delivery Status",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Orders_at_Risk"
+            ],
+            "source_table": "Delivery_Dim",
+            "source_column": "Delivery_Status"
+          },
+          {
+            "id": "InFull_Probability_Raw",
+            "label": "In-full probability (raw)",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Predictive_OTIF_Pct"
+            ],
+            "source_table": "_ARIS.Case",
+            "source_column": "In-full probability"
+          },
+          {
+            "id": "On_Time_Probability_Raw",
+            "label": "On-time probability (raw)",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Predictive_OTIF_Pct"
+            ],
+            "source_table": "_ARIS.Case",
+            "source_column": "On-time probability"
+          },
+          {
+            "id": "Order_Quantity",
+            "label": "Order Quantity",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "InFull",
+              "Delay_Risk",
+              "OTIF",
+              "Stock_Shortage"
+            ],
+            "source_table": "Sales Order DIM",
+            "source_column": "Order Quantity"
+          },
+          {
+            "id": "Requested_Delivery_Date",
+            "label": "Requested Delivery Date",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "On_Time",
+              "Avg_Delay_Duration",
+              "Delay_Risk",
+              "OTIF"
+            ],
+            "source_table": "Sales Order DIM",
+            "source_column": "Requested_Delivery_Date"
+          },
+          {
+            "id": "Route_Disruption",
+            "label": "Delivery Impacted by Route Disruptions",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Transport_Delay"
+            ],
+            "source_table": "Supply_Chain_KPI_Tuned",
+            "source_column": "Delivery Impacted by Route Disruptions"
+          },
+          {
+            "id": "Sales_Order_Number",
+            "label": "Sales Order Number",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "On_Time_Probability",
+              "OTIF_Pct"
+            ],
+            "source_table": "Sales Order DIM",
+            "source_column": "Sales Order Number"
+          },
+          {
+            "id": "Shipment_Affected_Raw",
+            "label": "Shipment Affected (raw)",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Shipment_Affected"
+            ],
+            "source_table": "Supply_Chain_KPI_Single_",
+            "source_column": "Shipment Affected"
+          },
+          {
+            "id": "Warehouse_Issue_Raw",
+            "label": "Warehouse Issue (raw)",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Warehouse_Issue"
+            ],
+            "source_table": "Supply_Chain_KPI_Single_",
+            "source_column": "Warehouse Issue"
+          },
+          {
+            "id": "Warehouse_Quantity",
+            "label": "Warehouse QUANTITY",
+            "type": "source",
+            "depends_on": [],
+            "feeds_into": [
+              "Stock_Shortage"
+            ],
+            "source_table": "Warehouse DIM",
+            "source_column": "QUANTITY"
+          }
+        ]
+      },
+      {
+        "level": 1,
+        "label": "First-Order Derived KPIs",
+        "nodes": [
+          {
+            "id": "Avg_Days_Delay_Duration",
+            "label": "Avg Days Delay Duration",
+            "type": "derived",
+            "depends_on": [
+              "Avg_Delay_Duration_ms"
+            ],
+            "feeds_into": [
+              "Days_Range_Delay"
+            ],
+            "logic": "Avg delay duration / 86400000"
+          },
+          {
+            "id": "Avg_Delay_Days_Dashboard",
+            "label": "Avg. Delay days",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Avg_Delay_Duration_ms"
+            ],
+            "feeds_into": [],
+            "logic": "MED(Avg delay duration)"
+          },
+          {
+            "id": "Avg_Delay_Duration",
+            "label": "Avg Delay Duration",
+            "type": "derived",
+            "depends_on": [
+              "Actual_Delivery_Date",
+              "Requested_Delivery_Date"
+            ],
+            "feeds_into": [],
+            "logic": "TIME_BETWEEN(Requested Delivery Date, Actual delivery Date) when Actual > Requested"
+          },
+          {
+            "id": "Delay_Order_Value",
+            "label": "Delay Order Value (EUR)",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Delay_Risk",
+            "label": "Delay Risk",
+            "type": "derived",
+            "depends_on": [
+              "Actual_Delivery_Date",
+              "Requested_Delivery_Date",
+              "Delivered_Quantity",
+              "Order_Quantity"
+            ],
+            "feeds_into": [
+              "Risk_Ratio"
+            ],
+            "logic": "CASE WHEN Actual > Requested AND Delivered Quantity < Order Quantity THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "InFull",
+            "label": "InFull",
+            "type": "derived",
+            "depends_on": [
+              "Delivered_Quantity",
+              "Order_Quantity"
+            ],
+            "feeds_into": [],
+            "logic": "CASE WHEN Delivered Quantity >= Order Quantity THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "Num_Materials",
+            "label": "# Materials",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Num_Total_Operators",
+            "label": "# Total Operators",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Num_Warehouse",
+            "label": "#Warehouse",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "OTIF",
+            "label": "OTIF",
+            "type": "derived",
+            "depends_on": [
+              "Actual_Delivery_Date",
+              "Requested_Delivery_Date",
+              "Delivered_Quantity",
+              "Order_Quantity"
+            ],
+            "feeds_into": [
+              "OTIF_Pct"
+            ],
+            "logic": "CASE WHEN Actual <= Requested AND Delivered >= Ordered THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "On_Time",
+            "label": "On Time",
+            "type": "derived",
+            "depends_on": [
+              "Actual_Delivery_Date",
+              "Requested_Delivery_Date"
+            ],
+            "feeds_into": [
+              "On_Time_Probability",
+              "Delivery_On_Time_Pct"
+            ],
+            "logic": "CASE WHEN Actual delivery Date <= Requested Delivery Date THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "Open_Orders",
+            "label": "Open Orders",
+            "type": "pre_aggregated",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": [
+              "Num_Open_Orders"
+            ],
+            "note": "Pre-aggregated ARIS dashboard value; use cases table as ground truth"
+          },
+          {
+            "id": "Orders_at_Risk",
+            "label": "Orders at Risk",
+            "type": "derived",
+            "depends_on": [
+              "Delivery_Status",
+              "Delay_Reason"
+            ],
+            "feeds_into": [
+              "Orders_At_Risk_Dashboard"
+            ],
+            "logic": "CASE WHEN Delivery_Status != 'Delivered' AND Delay Reason != NULL THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "Packing_Accuracy",
+            "label": "Packing accuracy",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Predictive_OTIF_Pct",
+            "label": "Predictive OTIF %",
+            "type": "derived",
+            "depends_on": [
+              "On_Time_Probability_Raw",
+              "InFull_Probability_Raw"
+            ],
+            "feeds_into": [
+              "Pred_OTIF_Dashboard"
+            ],
+            "logic": "On-time probability * In-full probability"
+          },
+          {
+            "id": "Savings_Lost",
+            "label": "Savings lost (EUR)",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Shipment_Affected",
+            "label": "Shipment Affected",
+            "type": "derived",
+            "depends_on": [
+              "Shipment_Affected_Raw"
+            ],
+            "feeds_into": [
+              "Num_Shipment_Affected"
+            ],
+            "logic": "CASE WHEN Shipment Affected = 1 THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "Stock_Shortage",
+            "label": "Stock Shortage in Warehouse",
+            "type": "derived",
+            "depends_on": [
+              "Order_Quantity",
+              "Warehouse_Quantity"
+            ],
+            "feeds_into": [
+              "Risk_Ratio"
+            ],
+            "logic": "CASE WHEN Warehouse QUANTITY < Order Quantity THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "Transport_Delay",
+            "label": "Transport Delay",
+            "type": "derived",
+            "depends_on": [
+              "Route_Disruption"
+            ],
+            "feeds_into": [
+              "Risk_Ratio"
+            ],
+            "logic": "CASE WHEN Delivery Impacted by Route Disruptions = 'Yes' THEN 1 ELSE 0 END"
+          },
+          {
+            "id": "Utilization_Efficiency",
+            "label": "Utilization Efficiency %",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Value_at_Risk",
+            "label": "Value at Risk (EUR)",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Warehouse_Issue",
+            "label": "Warehouse Issue",
+            "type": "derived",
+            "depends_on": [
+              "Warehouse_Issue_Raw"
+            ],
+            "feeds_into": [
+              "Warehouse_Issue_Dashboard",
+              "Order_Warehouse_Issue"
+            ],
+            "logic": "CASE WHEN Warehouse Issue != 'None' THEN 1 ELSE 0 END"
+          }
+        ]
+      },
+      {
+        "level": 2,
+        "label": "Second-Order KPIs & Dashboard Metrics",
+        "nodes": [
+          {
+            "id": "Days_Range_Delay",
+            "label": "Days Range Delay",
+            "type": "derived",
+            "depends_on": [
+              "Avg_Days_Delay_Duration"
+            ],
+            "feeds_into": [],
+            "logic": "Bucket Avg Days Delay Duration into A.1-10, B.11-20, C.21-30, D.31-40, >40"
+          },
+          {
+            "id": "Delivery_On_Time_Pct",
+            "label": "Delivery on time %",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "On_Time",
+              "Delivery_Number"
+            ],
+            "feeds_into": [],
+            "note": "Also sourced from ARIS cases table as pre-aggregated KPI"
+          },
+          {
+            "id": "Num_Open_Orders",
+            "label": "# Open Orders",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Open_Orders"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Num_Shipment_Affected",
+            "label": "# Shipment Affected",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Shipment_Affected",
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "OTIF_Pct",
+            "label": "OTIF %",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "OTIF",
+              "Sales_Order_Number"
+            ],
+            "feeds_into": [],
+            "logic": "SUM(OTIF) / COUNT(Sales Order Number)"
+          },
+          {
+            "id": "On_Time_Probability",
+            "label": "On Time Probability",
+            "type": "derived",
+            "depends_on": [
+              "On_Time",
+              "Sales_Order_Number"
+            ],
+            "feeds_into": [],
+            "logic": "SUM(On-time) / COUNT(Sales Order Number)"
+          },
+          {
+            "id": "Order_Warehouse_Issue",
+            "label": "Order with Warehouse Issue",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Warehouse_Issue"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Orders_At_Risk_Dashboard",
+            "label": "Orders At Risk",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Orders_at_Risk",
+              "Cases_Table"
+            ],
+            "feeds_into": []
+          },
+          {
+            "id": "Pred_OTIF_Dashboard",
+            "label": "Predictive OTIF %",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Predictive_OTIF_Pct"
+            ],
+            "feeds_into": [],
+            "logic": "AVG(Predictive OTIF %)"
+          },
+          {
+            "id": "Risk_Ratio",
+            "label": "Risk Ratio",
+            "type": "derived",
+            "depends_on": [
+              "Delay_Risk",
+              "Stock_Shortage",
+              "Transport_Delay"
+            ],
+            "feeds_into": [
+              "Check_Predictive_OTIF"
+            ],
+            "logic": "(Delay Risk + Stock Shortage in Warehouse + Transport Delay) / 3"
+          },
+          {
+            "id": "Warehouse_Issue_Dashboard",
+            "label": "Warehouse Issue",
+            "type": "dashboard_metric",
+            "depends_on": [
+              "Warehouse_Issue"
+            ],
+            "feeds_into": []
+          }
+        ]
+      },
+      {
+        "level": 3,
+        "label": "Third-Order KPIs",
+        "nodes": [
+          {
+            "id": "Check_Predictive_OTIF",
+            "label": "Check Predictive OTIF",
+            "type": "derived",
+            "depends_on": [
+              "Risk_Ratio"
+            ],
+            "feeds_into": [],
+            "logic": "CASE WHEN Risk ratio > 0.4 THEN 1 ELSE 0 END"
+          }
+        ]
+      }
     ],
-    "cases_table_kpis": [
-      "Delivery on time %",
-      "Avg. Delay days",
-      "# Materials",
-      "Orders At Risk",
-      "Delay Order Value(EUR)",
-      "Packing accuracy",
-      "# Shipment Affected",
-      "Value at Risk (EUR)",
-      "Savings lost (EUR)",
-      "Utilization Efficiency %",
-      "#Warehouse",
-      "# Total Operators",
-      "Warehouse Issue"
+    "flat_order": [
+      {
+        "position": 1,
+        "id": "Actual_Delivery_Date",
+        "label": "Actual Delivery Date",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 2,
+        "id": "Avg_Delay_Duration_ms",
+        "label": "Avg delay duration (ms)",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 3,
+        "id": "Cases_Table",
+        "label": "ARIS Cases Table (pre-aggregated)",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 4,
+        "id": "City",
+        "label": "City",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 5,
+        "id": "Delay_Reason",
+        "label": "Delay Reason for Delivery",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 6,
+        "id": "Delivered_Quantity",
+        "label": "Delivered Quantity",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 7,
+        "id": "Delivery_Number",
+        "label": "Delivery Number",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 8,
+        "id": "Delivery_Status",
+        "label": "Delivery Status",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 9,
+        "id": "InFull_Probability_Raw",
+        "label": "In-full probability (raw)",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 10,
+        "id": "On_Time_Probability_Raw",
+        "label": "On-time probability (raw)",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 11,
+        "id": "Order_Quantity",
+        "label": "Order Quantity",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 12,
+        "id": "Requested_Delivery_Date",
+        "label": "Requested Delivery Date",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 13,
+        "id": "Route_Disruption",
+        "label": "Delivery Impacted by Route Disruptions",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 14,
+        "id": "Sales_Order_Number",
+        "label": "Sales Order Number",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 15,
+        "id": "Shipment_Affected_Raw",
+        "label": "Shipment Affected (raw)",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 16,
+        "id": "Warehouse_Issue_Raw",
+        "label": "Warehouse Issue (raw)",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 17,
+        "id": "Warehouse_Quantity",
+        "label": "Warehouse QUANTITY",
+        "type": "source",
+        "level": 0
+      },
+      {
+        "position": 18,
+        "id": "Avg_Days_Delay_Duration",
+        "label": "Avg Days Delay Duration",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 19,
+        "id": "Avg_Delay_Days_Dashboard",
+        "label": "Avg. Delay days",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 20,
+        "id": "Delay_Order_Value",
+        "label": "Delay Order Value (EUR)",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 21,
+        "id": "Num_Materials",
+        "label": "# Materials",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 22,
+        "id": "Num_Total_Operators",
+        "label": "# Total Operators",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 23,
+        "id": "Num_Warehouse",
+        "label": "#Warehouse",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 24,
+        "id": "Open_Orders",
+        "label": "Open Orders",
+        "type": "pre_aggregated",
+        "level": 1
+      },
+      {
+        "position": 25,
+        "id": "Packing_Accuracy",
+        "label": "Packing accuracy",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 26,
+        "id": "Savings_Lost",
+        "label": "Savings lost (EUR)",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 27,
+        "id": "Utilization_Efficiency",
+        "label": "Utilization Efficiency %",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 28,
+        "id": "Value_at_Risk",
+        "label": "Value at Risk (EUR)",
+        "type": "dashboard_metric",
+        "level": 1
+      },
+      {
+        "position": 29,
+        "id": "Orders_at_Risk",
+        "label": "Orders at Risk",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 30,
+        "id": "Predictive_OTIF_Pct",
+        "label": "Predictive OTIF %",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 31,
+        "id": "InFull",
+        "label": "InFull",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 32,
+        "id": "Avg_Delay_Duration",
+        "label": "Avg Delay Duration",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 33,
+        "id": "Delay_Risk",
+        "label": "Delay Risk",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 34,
+        "id": "OTIF",
+        "label": "OTIF",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 35,
+        "id": "On_Time",
+        "label": "On Time",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 36,
+        "id": "Transport_Delay",
+        "label": "Transport Delay",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 37,
+        "id": "Shipment_Affected",
+        "label": "Shipment Affected",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 38,
+        "id": "Warehouse_Issue",
+        "label": "Warehouse Issue",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 39,
+        "id": "Stock_Shortage",
+        "label": "Stock Shortage in Warehouse",
+        "type": "derived",
+        "level": 1
+      },
+      {
+        "position": 40,
+        "id": "Days_Range_Delay",
+        "label": "Days Range Delay",
+        "type": "derived",
+        "level": 2
+      },
+      {
+        "position": 41,
+        "id": "Num_Open_Orders",
+        "label": "# Open Orders",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 42,
+        "id": "Orders_At_Risk_Dashboard",
+        "label": "Orders At Risk",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 43,
+        "id": "Pred_OTIF_Dashboard",
+        "label": "Predictive OTIF %",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 44,
+        "id": "OTIF_Pct",
+        "label": "OTIF %",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 45,
+        "id": "Delivery_On_Time_Pct",
+        "label": "Delivery on time %",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 46,
+        "id": "On_Time_Probability",
+        "label": "On Time Probability",
+        "type": "derived",
+        "level": 2
+      },
+      {
+        "position": 47,
+        "id": "Num_Shipment_Affected",
+        "label": "# Shipment Affected",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 48,
+        "id": "Order_Warehouse_Issue",
+        "label": "Order with Warehouse Issue",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 49,
+        "id": "Warehouse_Issue_Dashboard",
+        "label": "Warehouse Issue",
+        "type": "dashboard_metric",
+        "level": 2
+      },
+      {
+        "position": 50,
+        "id": "Risk_Ratio",
+        "label": "Risk Ratio",
+        "type": "derived",
+        "level": 2
+      },
+      {
+        "position": 51,
+        "id": "Check_Predictive_OTIF",
+        "label": "Check Predictive OTIF",
+        "type": "derived",
+        "level": 3
+      }
     ]
-  },
-  "layers": {
-    "0": [
-      "Actual Delivery Date",
-      "Requested Delivery Date",
-      "Delivery Number",
-      "City",
-      "InFull",
-      "Shipment Affected",
-      "Stock Shortage in Warehouse",
-      "Transport Delay",
-      "Warehouse Issue"
-    ],
-    "1": [
-      "On Time",
-      "Avg Delay Duration",
-      "Delay Risk",
-      "Open Orders",
-      "Orders at Risk",
-      "OTIF"
-    ],
-    "2": [
-      "Avg Days Delay Duration",
-      "On Time Probability",
-      "In-Full Probability",
-      "Risk Ratio"
-    ],
-    "3": [
-      "Days Range Delay",
-      "Check Predictive OTIF",
-      "Predictive OTIF %"
-    ],
-    "4": [
-      "Delivery on time %",
-      "Avg. Delay days",
-      "# Materials",
-      "Orders At Risk",
-      "Delay Order Value(EUR)",
-      "Packing accuracy",
-      "# Shipment Affected",
-      "Value at Risk (EUR)",
-      "Savings lost (EUR)",
-      "Utilization Efficiency %",
-      "#Warehouse",
-      "# Total Operators"
-    ]
-  },
-  "graph": {
-    "Actual Delivery Date": {
-      "depends_on": [],
-      "source_tables": [
-        "Delivery_Dim"
-      ],
-      "layer": 0,
-      "pql_logic": "\"Delivery DIM_csv\".\"Delivery_Date\"",
-      "sql_logic": "dd.\"Delivery_Date\"",
-      "definition": "Date when the product was actually delivered to the customer."
-    },
-    "Requested Delivery Date": {
-      "depends_on": [],
-      "source_tables": [
-        "Sales Order DIM"
-      ],
-      "layer": 0,
-      "pql_logic": "TO_DATE(\"Sales Order DIM_csv\".\"Requested_Delivery_Date\")",
-      "sql_logic": "CAST(so.\"Requested_Delivery_Date\" AS DATE)",
-      "definition": "Delivery date requested by the customer."
-    },
-    "Delivery Number": {
-      "depends_on": [],
-      "source_tables": [
-        "Delivery_Dim"
-      ],
-      "layer": 0,
-      "pql_logic": "\"Delivery DIM_csv\".\"Delivery Number\"",
-      "sql_logic": "dd.\"Delivery Number\"",
-      "definition": "Unique identifier for each delivery."
-    },
-    "City": {
-      "depends_on": [],
-      "source_tables": [
-        "Delivery_Dim"
-      ],
-      "layer": 0,
-      "pql_logic": "\"Delivery DIM_csv\".\"Source City\"",
-      "sql_logic": "dd.\"Source City\"",
-      "definition": "Source city of shipment."
-    },
-    "InFull": {
-      "depends_on": [],
-      "source_tables": [
-        "Sales Order DIM"
-      ],
-      "layer": 0,
-      "pql_logic": "CASE WHEN \"Sales Order DIM_csv\".\"Delivered Quantity\" >= \"Sales Order DIM_csv\".\"Order Quantity\" THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN so.\"Delivered Quantity\" >= so.\"Order Quantity\" THEN 1 ELSE 0 END",
-      "definition": "Checks whether delivered quantity meets ordered quantity."
-    },
-    "Shipment Affected": {
-      "depends_on": [],
-      "source_tables": [
-        "Supply_Chain_KPI_Single_Sheet"
-      ],
-      "layer": 0,
-      "pql_logic": "CASE WHEN (\"Supply_Chain_KPI_Single_Sheet_5500_csv\".\"Shipment Affected\"=1) THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN ss.\"Shipment Affected\" = 1 THEN 1 ELSE 0 END",
-      "definition": "Indicates shipment affected by disruption."
-    },
-    "Stock Shortage in Warehouse": {
-      "depends_on": [],
-      "source_tables": [
-        "Warehouse DIM",
-        "Sales Order DIM"
-      ],
-      "layer": 0,
-      "pql_logic": "CASE WHEN \"Warehouse DIM_csv\".\"QUANTITY\" < \"Sales Order DIM_csv\".\"Order Quantity\" THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN wd.\"QUANTITY\" < so.\"Order Quantity\" THEN 1 ELSE 0 END",
-      "definition": "Detects insufficient warehouse inventory."
-    },
-    "Transport Delay": {
-      "depends_on": [],
-      "source_tables": [
-        "Supply_Chain_KPI_Tuned"
-      ],
-      "layer": 0,
-      "pql_logic": "CASE WHEN \"Supply_Chain_KPI_Tuned_5500_csv\".\"Delivery Impacted by Route Disruptions\" = 'Yes' THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN sk.\"Delivery Impacted by Route Disruptions\" = 'Yes' THEN 1 ELSE 0 END",
-      "definition": "Delay caused by route disruptions."
-    },
-    "Warehouse Issue": {
-      "depends_on": [],
-      "source_tables": [
-        "Supply_Chain_KPI_Single_Sheet"
-      ],
-      "layer": 0,
-      "pql_logic": "CASE WHEN (\"Supply_Chain_KPI_Single_Sheet_5500_csv\".\"Warehouse Issue\"!='None') THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN ss.\"Warehouse Issue\" != 'None' THEN 1 ELSE 0 END",
-      "definition": "Operational issues occurring in warehouse (labour shortage, inventory mismatch, system downtime)."
-    },
-    "On Time": {
-      "depends_on": [
-        "Actual Delivery Date",
-        "Requested Delivery Date"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 1,
-      "pql_logic": "CASE WHEN \"_ARIS.Case\".\"Actual delivery Date\" != NULL_DATE AND \"_ARIS.Case\".\"Requested Delivery Date\" != NULL_DATE AND \"_ARIS.Case\".\"Actual delivery Date\" <= \"_ARIS.Case\".\"Requested Delivery Date\" THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN dd.\"Delivery_Date\" IS NOT NULL AND so.\"Requested_Delivery_Date\" IS NOT NULL AND dd.\"Delivery_Date\" <= so.\"Requested_Delivery_Date\" THEN 1 ELSE 0 END",
-      "definition": "Checks whether delivery occurred before or on requested date."
-    },
-    "Avg Delay Duration": {
-      "depends_on": [
-        "Actual Delivery Date",
-        "Requested Delivery Date"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 1,
-      "pql_logic": "CASE WHEN \"_ARIS.Case\".\"Actual delivery Date\" > \"_ARIS.Case\".\"Requested Delivery Date\" THEN TIME_BETWEEN(\"_ARIS.Case\".\"Requested Delivery Date\",\"_ARIS.Case\".\"Actual delivery Date\") END",
-      "sql_logic": "CASE WHEN dd.\"Delivery_Date\" > so.\"Requested_Delivery_Date\" THEN EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) * 1000 ELSE NULL END",
-      "definition": "Time difference between requested and actual delivery date when delivery is late."
-    },
-    "Delay Risk": {
-      "depends_on": [
-        "Actual Delivery Date",
-        "Requested Delivery Date",
-        "InFull"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 1,
-      "pql_logic": "CASE WHEN \"_ARIS.Case\".\"Actual delivery Date\" > \"_ARIS.Case\".\"Requested Delivery Date\" AND \"Sales Order DIM_csv\".\"Delivered Quantity\" < \"Sales Order DIM_csv\".\"Order Quantity\" THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN dd.\"Delivery_Date\" > so.\"Requested_Delivery_Date\" AND so.\"Delivered Quantity\" < so.\"Order Quantity\" THEN 1 ELSE 0 END",
-      "definition": "Identifies orders delayed and not fully delivered."
-    },
-    "Open Orders": {
-      "depends_on": [],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 1,
-      "pql_logic": "CASE WHEN (\"Delivery DIM_csv\".\"Delivery_Status\"!='Delivered') OR (\"Sales Order DIM_csv\".\"Delivered Quantity\" < \"Sales Order DIM_csv\".\"Order Quantity\") THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN dd.\"Delivery_Status\" != 'Delivered' OR so.\"Delivered Quantity\" < so.\"Order Quantity\" THEN 1 ELSE 0 END",
-      "definition": "Orders not yet fully delivered or partially delivered."
-    },
-    "Orders at Risk": {
-      "depends_on": [],
-      "source_tables": [
-        "Delivery_Dim",
-        "Supply_Chain_KPI_Tuned"
-      ],
-      "layer": 1,
-      "pql_logic": "CASE WHEN (\"Delivery DIM_csv\".\"Delivery_Status\")!= 'Delivered' AND \"Supply_Chain_KPI_Tuned_5500_csv\".\"Delay Reason for Delivery\" != NULL_TEXT THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN dd.\"Delivery_Status\" != 'Delivered' AND sk.\"Delay Reason for Delivery\" IS NOT NULL THEN 1 ELSE 0 END",
-      "definition": "Orders likely to be delayed due to issues (e.g. Carrier, traffic, weather)."
-    },
-    "OTIF": {
-      "depends_on": [
-        "Actual Delivery Date",
-        "Requested Delivery Date",
-        "InFull"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 1,
-      "pql_logic": "CASE WHEN \"_ARIS.Case\".\"Actual delivery Date\" <= \"_ARIS.Case\".\"Requested Delivery Date\" AND \"Sales Order DIM_csv\".\"Delivered Quantity\" >= \"Sales Order DIM_csv\".\"Order Quantity\" THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN dd.\"Delivery_Date\" <= so.\"Requested_Delivery_Date\" AND so.\"Delivered Quantity\" >= so.\"Order Quantity\" THEN 1 ELSE 0 END",
-      "definition": "Orders delivered On-Time and In-Full."
-    },
-    "Avg Days Delay Duration": {
-      "depends_on": [
-        "Avg Delay Duration"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 2,
-      "pql_logic": "\"_ARIS.Case\".\"Avg delay duration\"/86400000",
-      "sql_logic": "CASE WHEN dd.\"Delivery_Date\" > so.\"Requested_Delivery_Date\" THEN EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 ELSE NULL END",
-      "definition": "Average delay duration converted from milliseconds to days."
-    },
-    "On Time Probability": {
-      "depends_on": [
-        "On Time"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 2,
-      "pql_logic": "QUERY(SUM(\"_ARIS.Case\".\"On- time\") / CT(\"Sales Order DIM_csv\".\"Sales Order Number\"))",
-      "sql_logic": "SUM(CASE WHEN dd.\"Delivery_Date\" IS NOT NULL AND so.\"Requested_Delivery_Date\" IS NOT NULL AND dd.\"Delivery_Date\" <= so.\"Requested_Delivery_Date\" THEN 1 ELSE 0 END) * 1.0 / COUNT(*)",
-      "definition": "Percentage of orders delivered on time."
-    },
-    "In-Full Probability": {
-      "depends_on": [
-        "InFull"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 2,
-      "pql_logic": "QUERY(SUM(\"_ARIS.Case\".\"In-full\") / CT(\"Sales Order DIM_csv\".\"Sales Order Number\"))",
-      "sql_logic": "SUM(CASE WHEN so.\"Delivered Quantity\" >= so.\"Order Quantity\" THEN 1 ELSE 0 END) * 1.0 / COUNT(*)",
-      "definition": "Percentage of orders delivered in full."
-    },
-    "Risk Ratio": {
-      "depends_on": [
-        "Delay Risk",
-        "Stock Shortage in Warehouse",
-        "Transport Delay"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM",
-        "Warehouse DIM",
-        "Supply_Chain_KPI_Tuned"
-      ],
-      "layer": 2,
-      "pql_logic": "(\"_ARIS.Case\".\"Delay Risk\" + \"_ARIS.Case\".\"Stock shortage in warehouse\" + \"_ARIS.Case\".\"Transport Delay\") / 3",
-      "sql_logic": "(CASE WHEN dd.\"Delivery_Date\" > so.\"Requested_Delivery_Date\" AND so.\"Delivered Quantity\" < so.\"Order Quantity\" THEN 1 ELSE 0 END + CASE WHEN wd.\"QUANTITY\" < so.\"Order Quantity\" THEN 1 ELSE 0 END + CASE WHEN sk.\"Delivery Impacted by Route Disruptions\" = 'Yes' THEN 1 ELSE 0 END) / 3.0",
-      "definition": "Combined risk indicator \u2014 average of three risk signals."
-    },
-    "Days Range Delay": {
-      "depends_on": [
-        "Avg Days Delay Duration"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 3,
-      "pql_logic": "CASE WHEN ...",
-      "sql_logic": "CASE WHEN EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 > 0 AND EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 <= 10 THEN 'A.1-10' WHEN EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 >= 11 AND EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 <= 20 THEN 'B.11-20' WHEN EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 >= 21 AND EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 <= 30 THEN 'C.21-30' WHEN EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 >= 31 AND EXTRACT(EPOCH FROM (dd.\"Delivery_Date\" - so.\"Requested_Delivery_Date\")) / 86400.0 <= 40 THEN 'D.31-40' ELSE 'Delay More than 40 Days' END",
-      "definition": "Categorizes delay duration into ranges."
-    },
-    "Check Predictive OTIF": {
-      "depends_on": [
-        "Risk Ratio"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM",
-        "Warehouse DIM",
-        "Supply_Chain_KPI_Tuned"
-      ],
-      "layer": 3,
-      "pql_logic": "CASE WHEN (\"_ARIS.Case\".\"Risk ratio\") > 0.4 THEN 1 ELSE 0 END",
-      "sql_logic": "CASE WHEN (CASE WHEN dd.\"Delivery_Date\" > so.\"Requested_Delivery_Date\" AND so.\"Delivered Quantity\" < so.\"Order Quantity\" THEN 1 ELSE 0 END + CASE WHEN wd.\"QUANTITY\" < so.\"Order Quantity\" THEN 1 ELSE 0 END + CASE WHEN sk.\"Delivery Impacted by Route Disruptions\" = 'Yes' THEN 1 ELSE 0 END) / 3.0 > 0.4 THEN 1 ELSE 0 END",
-      "definition": "Predicts whether an order is likely to fail OTIF. 0.4 threshold suggested by client."
-    },
-    "Predictive OTIF %": {
-      "depends_on": [
-        "On Time Probability",
-        "In-Full Probability"
-      ],
-      "source_tables": [
-        "Delivery_Dim",
-        "Sales Order DIM"
-      ],
-      "layer": 3,
-      "pql_logic": "\"_ARIS.Case\".\"On-time probability\" * \"_ARIS.Case\".\"In-full probability\"",
-      "sql_logic": "(SUM(CASE WHEN dd.\"Delivery_Date\" <= so.\"Requested_Delivery_Date\" THEN 1 ELSE 0 END) * 1.0 / COUNT(*)) * (SUM(CASE WHEN so.\"Delivered Quantity\" >= so.\"Order Quantity\" THEN 1 ELSE 0 END) * 1.0 / COUNT(*))",
-      "definition": "Predicted OTIF success probability."
-    },
-    "Delivery on time %": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Delivery on time %' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Percentage of orders delivered on time \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "Avg. Delay days": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Avg. Delay days' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Average delay in days \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "# Materials": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '# Materials' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total number of distinct materials handled \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "Orders At Risk": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Orders At Risk' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Percentage or count of orders at risk of failing delivery \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "Delay Order Value(EUR)": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Delay Order Value(EUR)' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total monetary value of delayed orders in EUR \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "Packing accuracy": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Packing accuracy' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Percentage of orders packed correctly \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "# Shipment Affected": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '# Shipment Affected' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Count of shipments affected by disruptions \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "Value at Risk (EUR)": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Value at Risk (EUR)' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total value of orders at financial risk in EUR \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "Savings lost (EUR)": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Savings lost (EUR)' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total savings lost due to supply chain failures in EUR \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "Utilization Efficiency %": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = 'Utilization Efficiency %' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Warehouse or transport utilization efficiency as a percentage \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "#Warehouse": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '#Warehouse' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total number of active warehouses \u2014 pre-aggregated ARIS dashboard value."
-    },
-    "# Total Operators": {
-      "depends_on": [],
-      "source_tables": [
-        "cases"
-      ],
-      "layer": 4,
-      "pql_logic": "cases_table",
-      "sql_logic": "SELECT name AS kpi_name, value AS kpi_value, created_at FROM cases WHERE name = '# Total Operators' ORDER BY created_at DESC LIMIT 1",
-      "definition": "Total number of operators active in the supply chain \u2014 pre-aggregated ARIS dashboard value."
-    }
-  },
-  "adjacency_list": {
-    "Actual Delivery Date": [
-      "On Time",
-      "Avg Delay Duration",
-      "Delay Risk",
-      "OTIF"
-    ],
-    "Requested Delivery Date": [
-      "On Time",
-      "Avg Delay Duration",
-      "Delay Risk",
-      "OTIF"
-    ],
-    "Delivery Number": [],
-    "City": [],
-    "InFull": [
-      "Delay Risk",
-      "OTIF",
-      "In-Full Probability"
-    ],
-    "Shipment Affected": [],
-    "Stock Shortage in Warehouse": [
-      "Risk Ratio"
-    ],
-    "Transport Delay": [
-      "Risk Ratio"
-    ],
-    "Warehouse Issue": [],
-    "On Time": [
-      "On Time Probability"
-    ],
-    "Avg Delay Duration": [
-      "Avg Days Delay Duration"
-    ],
-    "Delay Risk": [
-      "Risk Ratio"
-    ],
-    "Open Orders": [],
-    "Orders at Risk": [],
-    "OTIF": [],
-    "Avg Days Delay Duration": [
-      "Days Range Delay"
-    ],
-    "On Time Probability": [
-      "Predictive OTIF %"
-    ],
-    "In-Full Probability": [
-      "Predictive OTIF %"
-    ],
-    "Risk Ratio": [
-      "Check Predictive OTIF"
-    ],
-    "Days Range Delay": [],
-    "Check Predictive OTIF": [],
-    "Predictive OTIF %": [],
-    "Delivery on time %": [],
-    "Avg. Delay days": [],
-    "# Materials": [],
-    "Orders At Risk": [],
-    "Delay Order Value(EUR)": [],
-    "Packing accuracy": [],
-    "# Shipment Affected": [],
-    "Value at Risk (EUR)": [],
-    "Savings lost (EUR)": [],
-    "Utilization Efficiency %": [],
-    "#Warehouse": [],
-    "# Total Operators": []
   }
 }

@@ -10,7 +10,7 @@ No,KPI Name,Definition,Source Column,PQL Logic,Purpose / Meaning
 9,InFull,Checks whether delivered quantity meets ordered quantity.,Sales Order DIM_csv.Delivered Quantity / Order Quantity,"CASE WHEN ""Sales Order DIM_csv"".""Delivered Quantity"" >= ""Sales Order DIM_csv"".""Order Quantity"" THEN 1 ELSE 0 END",1 means order was delivered in full.
 10,On Time,Checks whether delivery occurred before or on requested date.,_ARIS.Case.Actual delivery Date / Requested Delivery Date,"CASE WHEN ""_ARIS.Case"".""Actual delivery Date"" != NULL_DATE AND ""_ARIS.Case"".""Requested Delivery Date"" != NULL_DATE AND ""_ARIS.Case"".""Actual delivery Date"" <= ""_ARIS.Case"".""Requested Delivery Date"" THEN 1 ELSE 0 END",1 means order was delivered on time.
 11,On Time Probability,Percentage of orders delivered on time.,_ARIS.Case.On-time / Sales Order DIM_csv.Sales Order Number,"QUERY(SUM(""_ARIS.Case"".""On- time"") / CT(""Sales Order DIM_csv"".""Sales Order Number""))",Gives an overall on-time delivery rate.
-12,Open Orders,Orders not yet fully delivered or partially delivered.,Delivery DIM_csv.Delivery_Status / Sales Order DIM_csv,"CASE WHEN (""Delivery DIM_csv"".""Delivery_Status""!='Delivered') OR (""Sales Order DIM_csv"".""Delivered Quantity"" < ""Sales Order DIM_csv"".""Order Quantity"") THEN 1 ELSE 0 END",Tracks orders still pending completion.
+12,Open Orders,Orders not yet fully delivered or partially delivered — pre-aggregated ARIS dashboard value.,cases.value,cases_table,Pre-aggregated ARIS dashboard KPI. NOTE: SQL JOIN approach undercounts vs ARIS (JOIN drops rows + Delivery_Status strings may differ); use cases table as ground truth.
 13,Orders at Risk,"Orders likely to be delayed due to issues (e.g. Carrier, traffic, weather).",Delivery DIM_csv.Delivery_Status / Supply_Chain_KPI_Tuned_5500_csv.Delay Reason for Delivery,"CASE WHEN (""Delivery DIM_csv"".""Delivery_Status"")!= 'Delivered' AND ""Supply_Chain_KPI_Tuned_5500_csv"".""Delay Reason for Delivery"" != NULL_TEXT THEN 1 ELSE 0 END",Flags undelivered orders with a known delay reason.
 14,OTIF,Orders delivered On-Time and In-Full.,_ARIS.Case / Sales Order DIM_csv,"CASE WHEN ""_ARIS.Case"".""Actual delivery Date"" <= ""_ARIS.Case"".""Requested Delivery Date"" AND ""Sales Order DIM_csv"".""Delivered Quantity"" >= ""Sales Order DIM_csv"".""Order Quantity"" THEN 1 ELSE 0 END",Core KPI: 1 means order met both On-Time and In-Full criteria.
 15,Predictive OTIF %,Predicted OTIF success probability.,_ARIS.Case.On-time probability / In-full probability,"""_ARIS.Case"".""On-time probability"" * ""_ARIS.Case"".""In-full probability""",Combines on-time and in-full probability to forecast OTIF.
@@ -32,3 +32,22 @@ No,KPI Name,Definition,Source Column,PQL Logic,Purpose / Meaning
 31,Utilization Efficiency %,Warehouse or transport utilization efficiency as a percentage — sourced directly from ARIS cases table.,cases.value,cases_table,Pre-aggregated ARIS dashboard KPI for resource utilization.
 32,#Warehouse,Total number of active warehouses — sourced directly from ARIS cases table.,cases.value,cases_table,Pre-aggregated ARIS dashboard KPI for warehouse count.
 33,# Total Operators,Total number of operators active in the supply chain — sourced directly from ARIS cases table.,cases.value,cases_table,Pre-aggregated ARIS dashboard KPI for workforce count.
+,,,,,
+1,OTIF %,,,"SUM(""_ARIS.Case"".""OTIF"") / CT(""Sales Order DIM_csv"".""Sales Order Number"")",
+2,Predictive OTIF %,,,"AVG(""_ARIS.Case"".""Predictive OTIF %"")",
+3,# Open Orders,,,"SUM(""_ARIS.Case"".""Open Orders"")",
+4,Delivery on time %,,,"SUM(""_ARIS.Case"".""Field 1"") / CT(""Delivery DIM_csv"".""Delivery Number"")",
+5,Avg. Delay days,,,"MED(""_ARIS.Case"".""Avg delay duration"")",
+6,#Warehouse,,,CTD(WAREHOUSE ID),
+7,Order with Warehouse Issue,,,SUM(WAREHOUSE ISSUE),
+8,Utilization Efficiency %,,,"AVG(""Utilization Efficiency %"")",
+9,Savings lost,,,SUM(SAVINGS LOST(2025 PROJECTION)),
+10,# Materials,,,CTD(MATERIALS),
+11,Orders At Risk,,,SUM(ORDERS AT RISK),
+12,Delay Order Value(EUR),,,SUM(ESTIMATED DELAY IMAPACT),
+13,Packing accuracy,,,AVG(Packing accuracy),
+14,Warehouse Issue,,,SUM(WAREHOUSE ISSUE),
+15,# Total Operators,,,CTD(OPERATOR NAME),
+16,# Shipment Affected,,,SUM(SHIPPMENT AFFECTED),
+17,Value at Risk (EUR),,,SUM(VALUE AT RISK(UTILIZATION BASED)),
+18,Savings lost (EUR),,,SUM(SAVINGS LOST(2025 PROJECTION)),
