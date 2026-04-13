@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from mcp.router import QueryRouter
 
 
-SAFE_SQL   = 'SELECT "Source City", COUNT(*) FROM "Delivery_Dim" GROUP BY "Source City" LIMIT 500'
-UNSAFE_SQL = "DELETE FROM \"Delivery_Dim\""
+SAFE_SQL   = 'SELECT "Source City", COUNT(*) FROM delivery_dim GROUP BY "Source City" LIMIT 500'
+UNSAFE_SQL = "DELETE FROM delivery_dim"
 
 
 def _make_router(db_rows=None, context_items=None):
@@ -59,7 +59,7 @@ class TestQueryRouter:
     def test_route_blocks_update(self):
         router, _, _ = _make_router()
         with pytest.raises(PermissionError):
-            router.route("UPDATE \"Supply_Chain_KPI_Tuned\" SET \"Country\" = 'X'", "test")
+            router.route("UPDATE kpi_tuned SET \"Country\" = 'X'", "test")
 
     def test_route_propagates_db_runtime_error(self):
         router, mock_db, _ = _make_router()
@@ -73,7 +73,7 @@ class TestQueryRouter:
         result = router.route(SAFE_SQL, "test")
         assert result["data"] == []
         assert result["row_count"] == 0
-
+ 
     def test_route_context_returned(self):
         ctx = [{"KPI Name": "OTIF", "Definition": "On-Time In-Full."}]
         router, _, _ = _make_router(context_items=ctx)
