@@ -2,8 +2,10 @@ import logging
 from db.query_runner import QueryRunner
 from db.vector_store import VectorStore
 from utils.validator import validate_sql
+from agent.pipeline_logger import PipelineLogger
 
 logger = logging.getLogger(__name__)
+_plog = PipelineLogger()
 
 
 class QueryRouter:
@@ -48,8 +50,10 @@ class QueryRouter:
 
         # ── 2. Route to PostgreSQL ────────────────────────────────────────────
         logger.info("MCP routing to PostgreSQL")
+        _plog.db_hit(sql)
         data = self.db.execute(sql)
         logger.info("PostgreSQL returned %d rows", len(data))
+        _plog.result(data)
 
         # ── 3. Similarity search → pgvector for KPI context ───────────────────
         # Reduced to top_k=2 to prevent token overflow

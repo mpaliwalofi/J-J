@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from agent.sql_agent import SQLAgent
+from agent.pipeline_logger import PipelineLogger, _extract_tables_from_sql
 
 
 SAMPLE_INTENT = {
@@ -165,3 +166,215 @@ class TestSQLAgentRefine:
             )
 
         assert result == fixed_sql
+
+
+# ── Pipeline Logging Tests ────────────────────────────────────────────────────
+
+class TestPipelineLogging:
+    """
+    Verifies that PipelineLogger emits the expected stage labels to stdout
+    and that PQL validation correctly passes / warns.
+
+    All tests use capsys (pytest's stdout capture) — no live DB needed.
+    """
+
+    plog = PipelineLogger()
+
+    # ── Individual stage emitters ─────────────────────────────────────────
+
+    def test_nl_input_label_and_content(self, capsys):
+        self.plog.nl_input("What is the OTIF rate for Q1 2024?")
+        out = capsys.readouterr().out
+        assert "[NL INPUT]" in out
+        assert "What is the OTIF rate for Q1 2024?" in out
+
+    def test_pql_label_contains_kpi_name(self, capsys):
+        self.plog.pql('CASE WHEN sk."Delivery Compliance (%)" > 0 THEN 1 ELSE 0 END', "OTIF")
+        out = capsys.readouterr().out
+        assert "[PQL]" in out
+        assert "OTIF" in out
+
+    def test_pql_truncates_long_expression(self, capsys):
+        long_pql = "X" * 200
+        self.plog.pql(long_pql, "TestKPI")
+        out = capsys.readouterr().out
+        # Output should be truncated with ellipsis
+        assert "..." in out
+        # Should not print all 200 Xs
+        assert "X" * 121 not in out
+
+    def test_sql_label_and_inline_sql(self, capsys):
+        self.plog.sql('SELECT name, value FROM cases WHERE name = \'OTIF\' LIMIT 1')
+        out = capsys.readouterr().out
+        assert "[SQL]" in out
+        assert "SELECT" in out
+        assert "cases" in out
+
+    def test_sql_collapses_newlines(self, capsys):
+        multiline = "SELECT\n  name,\n  value\nFROM cases"
+        self.plog.sql(multiline)
+        out = capsys.readouterr().out
+        # Newlines should be collapsed to a single line
+        assert "\n  name," not in out
+        assert "SELECT" in out
+
+    def test_db_hit_shows_table_name(self, capsys):
+        sql = 'SELECT name, value FROM "cases" WHERE name = \'OTIF\''
+        self.plog.db_hit(sql)
+        out = capsys.readouterr().out
+        assert "[DB HIT]" in out
+        assert "Supabase PostgreSQL" in out
+        assert "cases" in out
+
+    def test_db_hit_computed_kpi_shows_base_table(self, capsys):
+        sql = 'SELECT SUM(...) FROM "Supply_Chain_KPI_Tuned" sk LEFT JOIN "Delivery_Dim" dd ON ...'
+        self.plog.db_hit(sql)
+        out = capsys.readouterr().out
+        assert "[DB HIT]" in out
+        assert "Supply_Chain_KPI_Tuned" in out
+
+    def test_result_zero_rows(self, capsys):
+        self.plog.result([])
+        out = capsys.readouterr().out
+        assert "[RESULT]" in out
+        assert "0 rows" in out
+
+    def test_result_single_row(self, capsys):
+        self.plog.result([{"kpi_name": "OTIF", "kpi_value": "25.2%"}])
+        out = capsys.readouterr().out
+        assert "[RESULT]" in out
+        assert "1 row" in out
+        assert "OTIF" in out
+
+    def test_result_multiple_rows_shows_count_and_sample(self, capsys):
+        rows = [{"city": "Mumbai", "count": 120}, {"city": "Delhi", "count": 95}]
+        self.plog.result(rows)
+        out = capsys.readouterr().out
+        assert "[RESULT]" in out
+        assert "2 rows" in out
+        assert "sample" in out
+
+    def test_separator_printed(self, capsys):
+        self.plog.separator()
+        out = capsys.readouterr().out
+        assert "─" in out
+
+    # ── PQL Validation ────────────────────────────────────────────────────
+
+    def test_pql_validation_pass_for_known_kpi(self, capsys):
+        """A KPI that exists in kpi_definitions.csv with only known columns → PASS."""
+        mock_defs = MagicMock()
+        mock_defs.get.return_value = {"name": "OTIF", "pql_logic": "..."}
+        mock_defs.definitions = {}
+
+        self.plog.pql_validation(
+            "OTIF",
+            mock_defs,
+            'CASE WHEN sk."Delivery Compliance (%)" > 0 THEN 1 ELSE 0 END',
+        )
+        out = capsys.readouterr().out
+        assert "[PQL VALID]" in out
+        assert "PASS" in out
+        assert "WARN" not in out
+
+    def test_pql_validation_warns_unknown_kpi_name(self, capsys):
+        """A KPI name absent from kpi_definitions.csv → WARN."""
+        mock_defs = MagicMock()
+        mock_defs.get.return_value = None  # not found
+        mock_defs.definitions = {}
+
+        self.plog.pql_validation("NonExistentKPI", mock_defs, "")
+        out = capsys.readouterr().out
+        assert "[PQL VALID]" in out
+        assert "WARN" in out
+        assert "NonExistentKPI" in out
+
+    def test_pql_validation_warns_unknown_column(self, capsys):
+        """PQL referencing a column not in kpi_definitions or the known set → WARN."""
+        mock_defs = MagicMock()
+        mock_defs.get.return_value = {"name": "OTIF"}  # KPI exists
+        mock_defs.definitions = {}
+
+        self.plog.pql_validation(
+            "OTIF",
+            mock_defs,
+            'CASE WHEN sk."NonExistentColumn_XYZ" > 0 THEN 1 ELSE 0 END',
+        )
+        out = capsys.readouterr().out
+        assert "WARN" in out
+        assert "NonExistentColumn_XYZ" in out
+
+    def test_pql_validation_known_column_no_warn(self, capsys):
+        """PQL referencing a well-known column → no column warning."""
+        mock_defs = MagicMock()
+        mock_defs.get.return_value = {"name": "Transport Delay"}
+        mock_defs.definitions = {}
+
+        self.plog.pql_validation(
+            "Transport Delay",
+            mock_defs,
+            'CASE WHEN sk."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1 ELSE 0 END',
+        )
+        out = capsys.readouterr().out
+        assert "[PQL VALID]" in out
+        # No unknown-column warning
+        assert "unknown field" not in out
+
+    # ── Table extraction helper ───────────────────────────────────────────
+
+    def test_extract_tables_cases_query(self):
+        sql = "SELECT name, value FROM \"cases\" WHERE name = 'OTIF' LIMIT 1"
+        tables = _extract_tables_from_sql(sql)
+        assert "cases" in tables
+
+    def test_extract_tables_computed_query(self):
+        sql = (
+            'SELECT SUM(...) AS result\n'
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"'
+        )
+        tables = _extract_tables_from_sql(sql)
+        assert "Supply_Chain_KPI_Tuned" in tables
+        assert "Delivery_Dim" in tables
+
+    # ── Full generate() integration ───────────────────────────────────────
+
+    def test_generate_emits_all_four_stages(self, capsys):
+        """
+        Call agent.generate() for a known KPI and verify all four log labels
+        appear in stdout (NL INPUT, PQL, PQL VALID, SQL).
+        DB HIT and RESULT are emitted by the router, not the agent — those
+        are verified separately above.
+        """
+        agent = _make_agent()
+        sql = agent.generate(
+            {"metric": "otif", "period": None, "cities": [], "confidence": 0.9},
+            "What is the OTIF rate?",
+        )
+        out = capsys.readouterr().out
+        assert "[NL INPUT]" in out
+        assert "[PQL]"      in out
+        assert "[PQL VALID]" in out
+        assert "[SQL]"      in out
+        # The generated SQL must be a SELECT
+        assert sql.strip().upper().startswith("SELECT")
+
+    def test_generate_logs_correct_query_in_nl_input(self, capsys):
+        agent = _make_agent()
+        query = "How many shipments were affected last month?"
+        agent.generate(
+            {"metric": "shipment_affected", "period": "last_month", "cities": [], "confidence": 0.8},
+            query,
+        )
+        out = capsys.readouterr().out
+        assert query in out
+
+    def test_generate_pql_valid_pass_for_cases_kpi(self, capsys):
+        """Pre-aggregated KPIs (cases tier) should pass PQL validation."""
+        agent = _make_agent()
+        agent.generate(
+            {"metric": "open_orders", "period": None, "cities": [], "confidence": 0.9},
+            "How many open orders are there?",
+        )
+        out = capsys.readouterr().out
+        assert "PASS" in out

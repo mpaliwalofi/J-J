@@ -68,8 +68,10 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from db.query_runner import QueryRunner
+from agent.pipeline_logger import PipelineLogger
 
 logger = logging.getLogger(__name__)
+_plog = PipelineLogger()
 
 # ============================================================================
 # CONFIGURATION
@@ -843,6 +845,10 @@ class SQLAgent:
         """
         logger.info("SQLAgent.generate | query: '%s'", original_query)
 
+        # ── [NL INPUT] ────────────────────────────────────────────────────
+        _plog.separator()
+        _plog.nl_input(original_query)
+
         # ── Stage 1: NL → KPI ────────────────────────────────────────────
         kpi_name, confidence = self.identify_kpi(original_query, intent)
 
@@ -876,14 +882,35 @@ class SQLAgent:
         # ── Stage 2: PQL → SQL ────────────────────────────────────────────
         tier = meta.get("tier", "computed")
 
+        # Capture the PQL expression before translation for logging
         if tier == "cases":
             cases_name = meta.get("cases_name") or CASES_TABLE_MAP.get(kpi_name) or kpi_name
+            pql_expr = f'cases.name = \'{cases_name}\''  # synthetic PQL for pre-aggregated tier
+        else:
+            pql_expr = (
+                meta.get("pql_override")
+                or meta.get("pql")
+                or self.kpi_defs.get_pql(kpi_name)
+                or ""
+            )
+
+        # ── [PQL] ─────────────────────────────────────────────────────────
+        _plog.pql(pql_expr, kpi_name)
+
+        # ── [PQL VALID] ───────────────────────────────────────────────────
+        _plog.pql_validation(kpi_name, self.kpi_defs, pql_expr)
+
+        # ── Generate SQL from PQL ─────────────────────────────────────────
+        if tier == "cases":
             sql = self._generate_cases_query(cases_name)
             # Note: cases table filters are not applicable (pre-aggregated)
             if period_cond:
                 sql += f"\n-- Note: period filter '{period}' not applied — value is pre-aggregated"
         else:
             sql = self._generate_computed_query(kpi_name, meta, period_cond, city_cond)
+
+        # ── [SQL] ─────────────────────────────────────────────────────────
+        _plog.sql(sql)
 
         logger.info("Generated SQL:\n%s", sql)
         return sql
