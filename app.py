@@ -45,7 +45,7 @@ classifier   = IntentClassifier()
 agent        = SQLAgent(db)
 router       = QueryRouter(db, vector_store)
 responder    = ResponseGenerator()
-validator    = ARISValidator(db)
+validator    = ARISValidator()
 
 MAX_RETRIES = 3
 

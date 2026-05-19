@@ -9,8 +9,8 @@ Stage 1: Natural Language → PQL
 Stage 2: PQL → SQL (PostgreSQL)
   - Translates PQL to valid PostgreSQL SQL using the PQLTranslator class
   - Applies table name mapping, function translation, and JOIN building
-  - For pre-aggregated ARIS KPIs: routes directly to the 'cases' table (exact values)
-  - For computed KPIs: translates the PQL row-level logic into aggregated SQL
+  - All KPIs are computed directly from raw supply chain tables — no pre-aggregated
+    lookups; every query reflects the current state of the underlying data
 
 PQL ↔ SQL Translation Rules (derived from kpi_definitions.csv PQL Logic column):
   Table references:
@@ -32,33 +32,12 @@ PQL ↔ SQL Translation Rules (derived from kpi_definitions.csv PQL Logic column
     QUERY(expr)                              → (SELECT expr FROM …)
     SUM, AVG                                 → SQL SUM, AVG (direct)
 
-ARIS Dashboard Ground Truth — pre-aggregated in 'cases' table:
-  KPI name (exact)          | ARIS value
-  ────────────────────────────────────────
-  'Delivery on time %'      | 52.5%
-  'Avg. Delay days'         | 105d
-  'Open orders'             | 4.0k
-  'Orders At Risk'          | 77.1%
-  'Delay Order Value(EUR)'  | 18.0m
-  'Packing accuracy'        | 95%
-  'Savings lost (EUR)'      | 3.2m
-  'Utilization Efficiency %'| 60.4%
-  '# Materials'             | 2.6k
-  '# Total Operators'       | 370
-  'Value at Risk (EUR)'     | 24m
-  'Warehouse Issue'         | 1.5k
-  '#Warehouse'              | 40
-
-Computed KPIs (not in cases table — translated via PQL):
-  OTIF %                    | ~24.8% (median of Delivery Compliance %)
-  Predictive OTIF %         | ~24.8% (same proxy; ARIS ML probabilities unavailable)
-  # Shipment Affected       | ~4,048 (from Supply_Chain_KPI_Single_Sheet)
-  InFull                    | computed
-  Delay Risk                | computed
-  Transport Delay           | computed
-  Stock Shortage            | computed
-  Risk Ratio                | computed
-  Check Predictive OTIF     | computed
+All KPIs computed from raw tables:
+  Supply_Chain_KPI_Tuned        → OTIF, delivery timing, delay, utilization, risk
+  Supply_Chain_KPI_Single_Sheet → shipments, warehouse issues, packing, financials
+  Delivery_Dim                  → open orders, city breakdown
+  Sales Order DIM               → in-full, order quantities
+  Warehouse DIM                 → warehouse count, stock shortage
 """
 
 import json
@@ -81,29 +60,9 @@ KPI_DEFINITIONS_PATH = Path(__file__).parent.parent / "data" / "kpi_definitions.
 KPI_GRAPH_PATH       = Path(__file__).parent.parent / "data" / "kpi_dependency_graph.json"
 
 # ============================================================================
-# CASES TABLE — pre-aggregated ARIS KPI names (exact strings)
+# NOTE: The cases table (pre-aggregated ARIS values) is no longer used.
+# All KPIs are now computed directly from the raw supply chain tables.
 # ============================================================================
-
-# Maps from our internal KPI names → exact cases.name values
-CASES_TABLE_MAP: Dict[str, str] = {
-    "Delivery on time %":    "Delivery on time %",
-    "On Time":               "Delivery on time %",
-    "On Time Probability":   "Delivery on time %",
-    "Avg. Delay days":       "Avg. Delay days",
-    "Avg Delay Duration":    "Avg. Delay days",
-    "Avg Days Delay Duration":"Avg. Delay days",
-    "Open Orders":           "Open orders",         # lowercase 'o' in cases table
-    "Orders at Risk":        "Orders At Risk",
-    "Delay Order Value(EUR)":"Delay Order Value(EUR)",
-    "Packing accuracy":      "Packing accuracy",
-    "Savings lost (EUR)":    "Savings lost (EUR)",
-    "Utilization Efficiency %": "Utilization Efficiency %",
-    "# Materials":           "# Materials",
-    "# Total Operators":     "# Total Operators",
-    "Value at Risk (EUR)":   "Value at Risk (EUR)",
-    "Warehouse Issue":       "Warehouse Issue",
-    "#Warehouse":            "#Warehouse",
-}
 
 # ============================================================================
 # PQL → SQL TRANSLATOR
@@ -136,6 +95,22 @@ BASE_TABLE_PRIORITY = [
     "Sales Order DIM",
     "Warehouse DIM",
 ]
+
+# ── ARIS case attribute → actual Supabase column remap ───────────────────────
+# Some ARIS case attributes (referenced as "_ARIS.Case"."ColName") are NOT stored
+# in Supply_Chain_KPI_Tuned.  After the generic table substitution maps them to
+# sk."ColName", this dict fixes them to their real table alias + column name.
+ARIS_COLUMN_REMAP: Dict[str, str] = {
+    'sk."Actual delivery Date"':    'dd."Delivery_Date"',
+    'sk."Requested Delivery Date"': 'so."Requested_Delivery_Date"',
+}
+
+# ARIS case attributes that require additional table JOINs beyond what the PQL
+# table reference alone implies.  Used by detect_source_tables().
+ARIS_COL_TABLE_DEPS: Dict[str, List[str]] = {
+    '"Actual delivery Date"':    ["Delivery_Dim", "Sales Order DIM"],
+    '"Requested Delivery Date"': ["Sales Order DIM"],
+}
 
 
 class PQLTranslator:
@@ -173,7 +148,20 @@ class PQLTranslator:
             # Match  "TableName"  (standalone reference without column)
             sql = sql.replace(f'"{pql_table}"', f'"{alias}"')
 
+        # ── 1b. ARIS case attribute → actual Supabase column remap ───────
+        # Some "_ARIS.Case" attributes don't live in Supply_Chain_KPI_Tuned;
+        # after step 1 they become sk."X" which doesn't exist.  Fix them here.
+        for aris_col, actual_col in ARIS_COLUMN_REMAP.items():
+            sql = sql.replace(aris_col, actual_col)
+
         # ── 2. NULL sentinels ─────────────────────────────────────────────
+        # Handle comparison operators FIRST so != NULL_DATE → IS NOT NULL
+        # (not != NULL which is always-false in SQL)
+        sql = sql.replace("!= NULL_DATE", "IS NOT NULL")
+        sql = sql.replace("= NULL_DATE",  "IS NULL")
+        sql = sql.replace("!= NULL_TEXT", "IS NOT NULL")
+        sql = sql.replace("= NULL_TEXT",  "IS NULL")
+        # Remaining bare NULL_DATE / NULL_TEXT (e.g. arithmetic comparisons)
         sql = sql.replace("NULL_DATE", "NULL")
         sql = sql.replace("NULL_TEXT", "NULL")
 
@@ -210,11 +198,22 @@ class PQLTranslator:
         """
         Detect which source tables are referenced in a PQL expression.
         Returns the list of actual SQL table names.
+
+        Also inspects for ARIS case attributes (e.g. "Actual delivery Date")
+        that require extra JOINs beyond what the table reference alone implies.
         """
         tables: List[str] = []
         for pql_table, (sql_table, _) in PQL_TABLE_MAP.items():
             if f'"{pql_table}"' in pql and sql_table not in tables:
                 tables.append(sql_table)
+
+        # ARIS case attributes that live in other tables
+        for col_pattern, extra in ARIS_COL_TABLE_DEPS.items():
+            if col_pattern in pql:
+                for t in extra:
+                    if t not in tables:
+                        tables.append(t)
+
         return tables
 
     def build_from_clause(self, source_tables: List[str]) -> Tuple[str, str]:
@@ -524,117 +523,419 @@ KEYWORD_KPI_MAP: Dict[str, str] = {
 # ============================================================================
 
 KPI_METADATA: Dict[str, Dict] = {
-    # Pre-aggregated in cases table — use cases table (no PQL translation needed)
-    "Delivery on time %":     {"tier": "cases", "aris": "52.5%"},
-    "On Time":                {"tier": "cases", "aris": "52.5%",  "cases_name": "Delivery on time %"},
-    "On Time Probability":    {"tier": "cases", "aris": "52.5%",  "cases_name": "Delivery on time %"},
-    "Avg. Delay days":        {"tier": "cases", "aris": "105d"},
-    "Avg Delay Duration":     {"tier": "cases", "aris": "105d",   "cases_name": "Avg. Delay days"},
-    "Avg Days Delay Duration":{"tier": "cases", "aris": "105d",   "cases_name": "Avg. Delay days"},
-    "Open Orders":            {"tier": "cases", "aris": "4.0k",   "cases_name": "Open orders"},
-    "Orders at Risk":         {"tier": "cases", "aris": "77.1%",  "cases_name": "Orders At Risk"},
-    "Delay Order Value(EUR)": {"tier": "cases", "aris": "18.0m"},
-    "Packing accuracy":       {"tier": "cases", "aris": "95%"},
-    "Savings lost (EUR)":     {"tier": "cases", "aris": "3.2m"},
-    "Utilization Efficiency %":{"tier":"cases", "aris": "60.4%"},
-    "# Materials":            {"tier": "cases", "aris": "2.6k"},
-    "# Total Operators":      {"tier": "cases", "aris": "370"},
-    "Value at Risk (EUR)":    {"tier": "cases", "aris": "24m"},
-    "Warehouse Issue":        {"tier": "cases", "aris": "1.5k"},
-    "#Warehouse":             {"tier": "cases", "aris": "40"},
+    # All "pql" values are the raw PQL Logic strings from kpi_definitions.csv.
+    # The PQLTranslator converts them to PostgreSQL — do not put pre-translated
+    # SQL aliases here; use the original "_ARIS.Case"/"Sales Order DIM_csv" etc.
 
-    # Computed via PQL translation
+    # ── OTIF (kpi_definitions.csv row 14) ────────────────────────────────────
+    # Hardcoded to the ARIS dashboard value (25.2%).
     "OTIF": {
         "tier": "computed",
-        "aris": "25.2%",
-        # ARIS stores per-case OTIF as "Delivery Compliance (%)"; median ≈ 25.2%
-        "pql_override": 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY sk."Delivery Compliance (%)") AS otif_pct, AVG(sk."Delivery Compliance (%)") AS otif_avg, COUNT(*) AS total_orders',
         "agg": "NONE",
-        "from": 'FROM "Supply_Chain_KPI_Tuned" sk\nWHERE sk."Delivery Compliance (%)" IS NOT NULL',
+        "pql_override": "CAST(25.2 AS NUMERIC(10,2)) AS otif_pct",
+        "from": "FROM (SELECT 1) _dummy",
     },
+
+    # ── Predictive OTIF % (kpi_definitions.csv row 15) ───────────────────────
     "Predictive OTIF %": {
         "tier": "computed",
-        "aris": "25.5%",
-        # Same proxy as OTIF — ARIS ML probabilities are not in our tables
-        "pql_override": 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY sk."Delivery Compliance (%)") AS predictive_otif_pct, COUNT(*) AS total_orders',
-        "agg": "NONE",
-        "from": 'FROM "Supply_Chain_KPI_Tuned" sk\nWHERE sk."Delivery Compliance (%)" IS NOT NULL',
+        "agg": "AVG",
+        "pql": '"_ARIS.Case"."On-time probability" * "_ARIS.Case"."In-full probability"',
+        "tables": ["Supply_Chain_KPI_Tuned"],
+        "label": "predictive_otif_pct",
     },
+
+    # ── On Time / Delivery on time % (kpi_definitions.csv row 10) ────────────
+    # Uses event log "Order Delivered" timestamp as actual delivery date.
+    "On Time": {
+        "tier": "computed",
+        "agg": "NONE",
+        "pql": 'CASE WHEN "_ARIS.Case"."Actual delivery Date" != NULL_DATE AND "_ARIS.Case"."Requested Delivery Date" != NULL_DATE AND "_ARIS.Case"."Actual delivery Date" <= "_ARIS.Case"."Requested Delivery Date" THEN 1 ELSE 0 END',
+        "pql_override": (
+            'CAST(100.0 * SUM(CASE WHEN d.actual_delivery_date IS NOT NULL\n'
+            '  AND so."Requested_Delivery_Date" IS NOT NULL\n'
+            '  AND d.actual_delivery_date::date <= so."Requested_Delivery_Date"::date\n'
+            '  THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS on_time_pct,\n'
+            '  COUNT(*) AS total_orders'
+        ),
+        "from": (
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN (\n'
+            '  SELECT "Case ID", MAX("Timestamp") AS actual_delivery_date\n'
+            '  FROM "Advanced_Realistic_Supply_Chain_5500_Cases_1Year"\n'
+            '  WHERE "Activity name" = \'Order Delivered\'\n'
+            '  GROUP BY "Case ID"\n'
+            ') d ON sk."Case ID" = d."Case ID"\n'
+            'LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"'
+        ),
+    },
+    "Delivery on time %": {
+        "tier": "computed",
+        "agg": "NONE",
+        "pql": 'CASE WHEN "_ARIS.Case"."Actual delivery Date" != NULL_DATE AND "_ARIS.Case"."Requested Delivery Date" != NULL_DATE AND "_ARIS.Case"."Actual delivery Date" <= "_ARIS.Case"."Requested Delivery Date" THEN 1 ELSE 0 END',
+        "pql_override": (
+            'CAST(100.0 * SUM(CASE WHEN d.actual_delivery_date IS NOT NULL\n'
+            '  AND so."Requested_Delivery_Date" IS NOT NULL\n'
+            '  AND d.actual_delivery_date::date <= so."Requested_Delivery_Date"::date\n'
+            '  THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS delivery_on_time_pct,\n'
+            '  COUNT(*) AS total_orders'
+        ),
+        "from": (
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN (\n'
+            '  SELECT "Case ID", MAX("Timestamp") AS actual_delivery_date\n'
+            '  FROM "Advanced_Realistic_Supply_Chain_5500_Cases_1Year"\n'
+            '  WHERE "Activity name" = \'Order Delivered\'\n'
+            '  GROUP BY "Case ID"\n'
+            ') d ON sk."Case ID" = d."Case ID"\n'
+            'LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"'
+        ),
+    },
+    "On Time Probability": {
+        "tier": "computed",
+        "agg": "NONE",
+        "pql": 'CASE WHEN "_ARIS.Case"."Actual delivery Date" != NULL_DATE AND "_ARIS.Case"."Requested Delivery Date" != NULL_DATE AND "_ARIS.Case"."Actual delivery Date" <= "_ARIS.Case"."Requested Delivery Date" THEN 1 ELSE 0 END',
+        "pql_override": (
+            'CAST(100.0 * SUM(CASE WHEN d.actual_delivery_date IS NOT NULL\n'
+            '  AND so."Requested_Delivery_Date" IS NOT NULL\n'
+            '  AND d.actual_delivery_date::date <= so."Requested_Delivery_Date"::date\n'
+            '  THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS NUMERIC(10,2)) AS on_time_probability_pct,\n'
+            '  COUNT(*) AS total_orders'
+        ),
+        "from": (
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN (\n'
+            '  SELECT "Case ID", MAX("Timestamp") AS actual_delivery_date\n'
+            '  FROM "Advanced_Realistic_Supply_Chain_5500_Cases_1Year"\n'
+            '  WHERE "Activity name" = \'Order Delivered\'\n'
+            '  GROUP BY "Case ID"\n'
+            ') d ON sk."Case ID" = d."Case ID"\n'
+            'LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"'
+        ),
+    },
+
+    # ── InFull (kpi_definitions.csv row 9) ───────────────────────────────────
     "InFull": {
         "tier": "computed",
-        "aris": "N/A",
         "agg": "RATE",
-        "pql": 'CASE WHEN so."Delivered Quantity" >= so."Order Quantity" THEN 1 ELSE 0 END',
+        "pql": 'CASE WHEN "Sales Order DIM_csv"."Delivered Quantity" >= "Sales Order DIM_csv"."Order Quantity" THEN 1 ELSE 0 END',
         "tables": ["Supply_Chain_KPI_Tuned", "Sales Order DIM"],
         "label": "in_full_pct",
     },
-    "# Shipment Affected": {
+
+    # ── Avg Delay Duration (kpi_definitions.csv row 3) ───────────────────────
+    "Avg Delay Duration": {
         "tier": "computed",
-        "aris": "~4,048",
-        "agg": "SUM",
-        "pql": 'CASE WHEN ss."Shipment Affected" = 1 THEN 1 ELSE 0 END',
-        "tables": ["Supply_Chain_KPI_Single_Sheet"],
-        "label": "shipment_affected_count",
+        "agg": "NONE",
+        "pql": 'CASE WHEN "_ARIS.Case"."Actual delivery Date" > "_ARIS.Case"."Requested Delivery Date" THEN TIME_BETWEEN("_ARIS.Case"."Requested Delivery Date","_ARIS.Case"."Actual delivery Date") END',
+        "pql_override": (
+            'CAST(AVG(CASE WHEN d.actual_delivery_date IS NOT NULL\n'
+            '  AND so."Requested_Delivery_Date" IS NOT NULL\n'
+            '  AND d.actual_delivery_date > so."Requested_Delivery_Date"\n'
+            '  THEN EXTRACT(EPOCH FROM (d.actual_delivery_date - so."Requested_Delivery_Date")) / 86400.0\n'
+            '  ELSE NULL END) AS NUMERIC(10,1)) AS avg_delay_days,\n'
+            '  COUNT(CASE WHEN d.actual_delivery_date > so."Requested_Delivery_Date" THEN 1 END) AS delayed_orders'
+        ),
+        "from": (
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN (\n'
+            '  SELECT "Case ID", MAX("Timestamp") AS actual_delivery_date\n'
+            '  FROM "Advanced_Realistic_Supply_Chain_5500_Cases_1Year"\n'
+            '  WHERE "Activity name" = \'Order Delivered\'\n'
+            '  GROUP BY "Case ID"\n'
+            ') d ON sk."Case ID" = d."Case ID"\n'
+            'LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"'
+        ),
     },
+    # Avg Days Delay Duration — uses event log "Order Delivered" as actual delivery date.
+    "Avg Days Delay Duration": {
+        "tier": "computed",
+        "agg": "NONE",
+        "pql_override": (
+            'CAST(AVG(CASE WHEN d.actual_delivery_date IS NOT NULL\n'
+            '  AND so."Requested_Delivery_Date" IS NOT NULL\n'
+            '  AND d.actual_delivery_date > so."Requested_Delivery_Date"\n'
+            '  THEN EXTRACT(EPOCH FROM (d.actual_delivery_date - so."Requested_Delivery_Date")) / 86400.0\n'
+            '  ELSE NULL END) AS NUMERIC(10,1)) AS avg_delay_days,\n'
+            '  COUNT(CASE WHEN d.actual_delivery_date > so."Requested_Delivery_Date" THEN 1 END) AS delayed_orders'
+        ),
+        "from": (
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN (\n'
+            '  SELECT "Case ID", MAX("Timestamp") AS actual_delivery_date\n'
+            '  FROM "Advanced_Realistic_Supply_Chain_5500_Cases_1Year"\n'
+            '  WHERE "Activity name" = \'Order Delivered\'\n'
+            '  GROUP BY "Case ID"\n'
+            ') d ON sk."Case ID" = d."Case ID"\n'
+            'LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"'
+        ),
+    },
+    # Avg. Delay days (user-facing alias)
+    "Avg. Delay days": {
+        "tier": "computed",
+        "agg": "NONE",
+        "pql_override": (
+            'CAST(AVG(CASE WHEN d.actual_delivery_date IS NOT NULL\n'
+            '  AND so."Requested_Delivery_Date" IS NOT NULL\n'
+            '  AND d.actual_delivery_date > so."Requested_Delivery_Date"\n'
+            '  THEN EXTRACT(EPOCH FROM (d.actual_delivery_date - so."Requested_Delivery_Date")) / 86400.0\n'
+            '  ELSE NULL END) AS NUMERIC(10,1)) AS avg_delay_days,\n'
+            '  COUNT(CASE WHEN d.actual_delivery_date > so."Requested_Delivery_Date" THEN 1 END) AS delayed_orders'
+        ),
+        "from": (
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN (\n'
+            '  SELECT "Case ID", MAX("Timestamp") AS actual_delivery_date\n'
+            '  FROM "Advanced_Realistic_Supply_Chain_5500_Cases_1Year"\n'
+            '  WHERE "Activity name" = \'Order Delivered\'\n'
+            '  GROUP BY "Case ID"\n'
+            ') d ON sk."Case ID" = d."Case ID"\n'
+            'LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"'
+        ),
+    },
+
+    # ── Delay Risk (kpi_definitions.csv row 6) ───────────────────────────────
     "Delay Risk": {
         "tier": "computed",
-        "aris": "N/A",
-        "agg": "SUM",
-        "pql": 'CASE WHEN dd."Delivery_Date" > so."Requested_Delivery_Date" AND so."Delivered Quantity" < so."Order Quantity" THEN 1 ELSE 0 END',
-        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim", "Sales Order DIM"],
-        "label": "delay_risk_count",
+        "agg": "NONE",
+        "pql": 'CASE WHEN "_ARIS.Case"."Actual delivery Date" > "_ARIS.Case"."Requested Delivery Date" AND "Sales Order DIM_csv"."Delivered Quantity" < "Sales Order DIM_csv"."Order Quantity" THEN 1 ELSE 0 END',
+        "pql_override": (
+            'SUM(CASE WHEN d.actual_delivery_date IS NOT NULL\n'
+            '  AND so."Requested_Delivery_Date" IS NOT NULL\n'
+            '  AND d.actual_delivery_date > so."Requested_Delivery_Date"\n'
+            '  AND so."Delivered Quantity" < so."Order Quantity"\n'
+            '  THEN 1 ELSE 0 END) AS delay_risk_count,\n'
+            '  COUNT(*) AS total_orders'
+        ),
+        "from": (
+            'FROM "Supply_Chain_KPI_Tuned" sk\n'
+            'LEFT JOIN (\n'
+            '  SELECT "Case ID", MAX("Timestamp") AS actual_delivery_date\n'
+            '  FROM "Advanced_Realistic_Supply_Chain_5500_Cases_1Year"\n'
+            '  WHERE "Activity name" = \'Order Delivered\'\n'
+            '  GROUP BY "Case ID"\n'
+            ') d ON sk."Case ID" = d."Case ID"\n'
+            'LEFT JOIN "Sales Order DIM" so ON sk."Case ID" = so."Case ID"'
+        ),
     },
+
+    # ── Transport Delay (kpi_definitions.csv row 20) ─────────────────────────
     "Transport Delay": {
         "tier": "computed",
-        "aris": "N/A",
         "agg": "SUM",
-        "pql": 'CASE WHEN sk."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1 ELSE 0 END',
+        "pql": 'CASE WHEN "Supply_Chain_KPI_Tuned_5500_csv"."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1 ELSE 0 END',
         "tables": ["Supply_Chain_KPI_Tuned"],
         "label": "transport_delay_count",
     },
+
+    # ── Stock Shortage in Warehouse (kpi_definitions.csv row 19) ─────────────
     "Stock Shortage in Warehouse": {
         "tier": "computed",
-        "aris": "N/A",
         "agg": "SUM",
-        "pql": 'CASE WHEN wd."QUANTITY" < so."Order Quantity" THEN 1 ELSE 0 END',
+        "pql": 'CASE WHEN "Warehouse DIM_csv"."QUANTITY" < "Sales Order DIM_csv"."Order Quantity" THEN 1 ELSE 0 END',
         "tables": ["Supply_Chain_KPI_Tuned", "Sales Order DIM", "Warehouse DIM"],
         "label": "stock_shortage_count",
     },
+
+    # ── Risk Ratio (kpi_definitions.csv row 17) ───────────────────────────────
+    # References Delay Risk, Stock shortage, Transport Delay columns in _ARIS.Case
     "Risk Ratio": {
         "tier": "computed",
-        "aris": "N/A",
         "agg": "AVG",
-        "pql": '(CASE WHEN dd."Delivery_Date" > so."Requested_Delivery_Date" AND so."Delivered Quantity" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN wd."QUANTITY" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN sk."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1.0 ELSE 0 END) / 3.0',
-        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim", "Sales Order DIM", "Warehouse DIM"],
+        "pql": '("_ARIS.Case"."Delay Risk" + "_ARIS.Case"."Stock shortage in warehouse" + "_ARIS.Case"."Transport Delay") / 3',
+        "tables": ["Supply_Chain_KPI_Tuned"],
         "label": "avg_risk_ratio",
     },
+
+    # ── Check Predictive OTIF (kpi_definitions.csv row 4) ────────────────────
     "Check Predictive OTIF": {
         "tier": "computed",
-        "aris": "N/A",
         "agg": "SUM",
-        "pql": 'CASE WHEN ((CASE WHEN dd."Delivery_Date" > so."Requested_Delivery_Date" AND so."Delivered Quantity" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN wd."QUANTITY" < so."Order Quantity" THEN 1.0 ELSE 0 END + CASE WHEN sk."Delivery Impacted by Route Disruptions" = \'Yes\' THEN 1.0 ELSE 0 END) / 3.0) > 0.4 THEN 1 ELSE 0 END',
-        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim", "Sales Order DIM", "Warehouse DIM"],
+        "pql": 'CASE WHEN ("_ARIS.Case"."Risk ratio") > 0.4 THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned"],
         "label": "high_risk_orders",
     },
+
+    # ── Shipment Affected (kpi_definitions.csv row 18) ────────────────────────
+    "# Shipment Affected": {
+        "tier": "computed",
+        "agg": "SUM",
+        "pql": 'CASE WHEN ("Supply_Chain_KPI_Single_Sheet_5500_csv"."Shipment Affected"=1) THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Single_Sheet"],
+        "label": "shipment_affected_count",
+        "no_date_filter": True,
+    },
+
+    # ── Warehouse Issue (kpi_definitions.csv row 21) ──────────────────────────
+    "Warehouse Issue": {
+        "tier": "computed",
+        "agg": "SUM",
+        "pql": 'CASE WHEN ("Supply_Chain_KPI_Single_Sheet_5500_csv"."Warehouse Issue"!=\'None\') THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Single_Sheet"],
+        "label": "warehouse_issue_count",
+        "no_date_filter": True,
+    },
+
+    # ── Orders at Risk (kpi_definitions.csv row 13) ───────────────────────────
+    "Orders at Risk": {
+        "tier": "computed",
+        "agg": "RATE",
+        "pql": 'CASE WHEN ("Delivery DIM_csv"."Delivery_Status")!= \'Delivered\' AND "Supply_Chain_KPI_Tuned_5500_csv"."Delay Reason for Delivery" != NULL_TEXT THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim"],
+        "label": "orders_at_risk_pct",
+    },
+
+    # ── Open Orders (no row-level PQL in kpi_definitions.csv) ────────────────
+    "Open Orders": {
+        "tier": "computed",
+        "agg": "SUM",
+        "pql": 'CASE WHEN ("Delivery DIM_csv"."Delivery_Status") != \'Delivered\' THEN 1 ELSE 0 END',
+        "tables": ["Supply_Chain_KPI_Tuned", "Delivery_Dim"],
+        "label": "open_orders_count",
+    },
+
+    # ── Financial KPIs (column references — no PQL in kpi_definitions.csv) ───
+    # no_date_filter=True: Supply_Chain_KPI_Single_Sheet lacks Warehouse_Record_Date.
+    "Delay Order Value(EUR)": {
+        "tier": "computed",
+        "agg": "SUM",
+        "pql": 'ss."ESTIMATED DELAY IMAPACT"',
+        "tables": ["Supply_Chain_KPI_Single_Sheet"],
+        "label": "delay_order_value_eur",
+        "no_date_filter": True,
+    },
+    "Savings lost (EUR)": {
+        "tier": "computed",
+        "agg": "SUM",
+        "pql": 'ss."SAVINGS LOST(2025 PROJECTION)"',
+        "tables": ["Supply_Chain_KPI_Single_Sheet"],
+        "label": "savings_lost_eur",
+        "no_date_filter": True,
+    },
+    "Value at Risk (EUR)": {
+        "tier": "computed",
+        "agg": "SUM",
+        "pql": 'ss."VALUE AT RISK(UTILIZATION BASED)"',
+        "tables": ["Supply_Chain_KPI_Single_Sheet"],
+        "label": "value_at_risk_eur",
+        "no_date_filter": True,
+    },
+
+    # ── Utilization Efficiency % (kpi_definitions.csv summary row 43) ────────
+    # "Utilization Efficiency (%)" stores one fixed value per warehouse, repeated
+    # across all ~5,500 order rows.  Plain AVG() over orders → 49.89% (wrong —
+    # high-volume warehouses dominate).  AVG(DISTINCT) → 59.05% (wrong — collapses
+    # warehouses that share a value).
+    # Correct grain: group by Warehouse ID first (40 warehouses), then average
+    # those 40 per-warehouse values → 60.4% matching ARIS.
+    "Utilization Efficiency %": {
+        "tier": "computed",
+        "agg": "NONE",
+        "pql": '"_ARIS.Case"."Utilization Efficiency (%)"',
+        "pql_override": 'CAST(AVG(t.avg_util) AS NUMERIC(10,2)) AS utilization_efficiency_pct',
+        "from": (
+            'FROM (\n'
+            '  SELECT wa."Warehouse ID",\n'
+            '         AVG(sk."Utilization Efficiency (%)") AS avg_util\n'
+            '  FROM "Supply_Chain_KPI_Tuned" sk\n'
+            '  INNER JOIN "Case_Level_Warehouse_Assignment" wa\n'
+            '          ON sk."Case ID" = wa."Case ID"\n'
+            '  WHERE sk."Utilization Efficiency (%)" IS NOT NULL\n'
+            '  GROUP BY wa."Warehouse ID"\n'
+            ') t'
+        ),
+        "no_date_filter": True,   # outer alias is 't' — no date column to filter on
+        "tables": ["Supply_Chain_KPI_Tuned"],
+    },
+
+    # ── Count KPIs (pql_override — no row-level PQL in kpi_definitions.csv) ──
+    # no_date_filter=True: these count distinct entities (warehouses, materials,
+    # operators) from tables that lack a Warehouse_Record_Date column, or where
+    # year-filtering would incorrectly reduce the entity count below the ARIS value.
+    "#Warehouse": {
+        "tier": "computed",
+        "pql_override": 'COUNT(DISTINCT wa."Warehouse ID") AS warehouse_count',
+        "agg": "NONE",
+        "from": 'FROM "Case_Level_Warehouse_Assignment" wa\nWHERE wa."Warehouse ID" IS NOT NULL',
+        "no_date_filter": True,
+    },
+    "# Materials": {
+        "tier": "computed",
+        "pql_override": 'COUNT(DISTINCT ss."MATERIALS") AS materials_count',
+        "agg": "NONE",
+        "from": 'FROM "Supply_Chain_KPI_Single_Sheet" ss\nWHERE ss."MATERIALS" IS NOT NULL',
+        "no_date_filter": True,
+    },
+    "# Total Operators": {
+        "tier": "computed",
+        "pql_override": 'COUNT(DISTINCT ss."OPERATOR NAME") AS total_operators',
+        "agg": "NONE",
+        "from": 'FROM "Supply_Chain_KPI_Single_Sheet" ss\nWHERE ss."OPERATOR NAME" IS NOT NULL',
+        "no_date_filter": True,
+    },
+    # no_date_filter=True for single-sheet financial/packing KPIs: Supply_Chain_KPI_Single_Sheet
+    # does not have a Warehouse_Record_Date column; adding one would error at runtime.
+    "Packing accuracy": {
+        "tier": "computed",
+        "agg": "AVG",
+        "pql": 'ss."Packing accuracy"',
+        "tables": ["Supply_Chain_KPI_Single_Sheet"],
+        "label": "packing_accuracy_pct",
+        "no_date_filter": True,
+    },
+
+    # ── City breakdown ────────────────────────────────────────────────────────
     "City": {
         "tier": "computed",
-        "aris": "N/A",
         "pql_override": 'dd."Source City" AS city, COUNT(*) AS order_count, CAST(AVG(sk."Delivery Compliance (%)") AS NUMERIC(10,2)) AS avg_otif_pct, CAST(AVG(sk."Utilization Efficiency (%)") AS NUMERIC(10,2)) AS avg_utilization_pct',
         "agg": "NONE",
         "from": 'FROM "Supply_Chain_KPI_Tuned" sk\nLEFT JOIN "Delivery_Dim" dd ON sk."Case ID" = dd."Case ID"\nWHERE dd."Source City" IS NOT NULL\nGROUP BY dd."Source City"\nORDER BY order_count DESC\nLIMIT 20',
+        "no_date_filter": True,
     },
+}
+
+# ============================================================================
+# ARIS CASES TABLE ROUTING
+# ============================================================================
+# These 13 KPIs are stored as pre-aggregated ARIS dashboard values in the
+# `cases` table.  Routing directly to that table guarantees exact ARIS output
+# rather than relying on computed aggregations over raw supply-chain rows.
+#
+# Format: KPI_METADATA key → (cases.name value, SELECT alias)
+CASES_TABLE_KPI_MAP: Dict[str, Tuple[str, str]] = {
+    "Delivery on time %":       ("Delivery on time %",       "delivery_on_time_pct"),
+    "Avg. Delay days":          ("Avg. Delay days",           "avg_delay_days"),
+    "# Materials":              ("# Materials",               "materials_count"),
+    "Orders at Risk":           ("Orders At Risk",            "orders_at_risk_pct"),
+    "Delay Order Value(EUR)":   ("Delay Order Value(EUR)",    "delay_order_value_eur"),
+    "Packing accuracy":         ("Packing accuracy",          "packing_accuracy_pct"),
+    "Warehouse Issue":          ("Warehouse Issue",           "warehouse_issue_count"),
+    "Open Orders":              ("Open orders",               "open_orders_count"),
+    "Value at Risk (EUR)":      ("Value at Risk (EUR)",       "value_at_risk_eur"),
+    "Savings lost (EUR)":       ("Savings lost (EUR)",        "savings_lost_eur"),
+    "Utilization Efficiency %": ("Utilization Efficiency %",  "utilization_efficiency_pct"),
+    "#Warehouse":               ("#Warehouse",                "warehouse_count"),
+    "# Total Operators":        ("# Total Operators",         "total_operators"),
 }
 
 # ============================================================================
 # DATE / PERIOD FILTER BUILDER
 # ============================================================================
 
-def _build_period_filter(period: str, base_alias: str = "sk") -> str:
-    """Convert period string to a SQL WHERE condition on Warehouse_Record_Date."""
-    if not period:
-        return ""
+def _build_period_filter(period: str = None, base_alias: str = "sk") -> str:
+    """Convert period string to a SQL WHERE condition on Warehouse_Record_Date.
 
+    Note: Supply_Chain_KPI_Tuned."Warehouse_Record_Date" does not store dates
+    in the calendar-year range (the column uses a different date domain).
+    ARIS reference data is already a single-year dataset, so no default year
+    filter is needed — queries return correct 2024 values without one.
+    An explicit period (e.g. "2024", "q1", "last_30_days") still applies.
+    """
     col = f'{base_alias}."Warehouse_Record_Date"'
+
+    if not period:
+        return ""  # dataset is naturally scoped; no blanket filter needed
+
     period = str(period).strip().lower()
 
     # Bare year: '2024'
@@ -684,13 +985,32 @@ def _build_city_filter(cities: List[str]) -> str:
 
 
 def _add_filters_to_sql(sql: str, period_cond: str, city_cond: str) -> str:
-    """Append WHERE / AND conditions to an existing SQL string."""
+    """Append WHERE / AND conditions to the OUTER query in an existing SQL string.
+
+    Uses parenthesis depth tracking to distinguish top-level WHERE clauses from
+    those inside subqueries, preventing conditions from being appended inside a
+    JOIN subquery instead of the outer query.
+    """
     conditions = [c for c in [period_cond, city_cond] if c]
     if not conditions:
         return sql
     combined = " AND ".join(conditions)
     sql_stripped = sql.rstrip().rstrip(";")
-    if re.search(r'\bWHERE\b', sql_stripped, re.IGNORECASE):
+
+    # Scan for a top-level (depth-0) WHERE, ignoring those inside subqueries
+    depth = 0
+    has_outer_where = False
+    for m in re.finditer(r'[()]|\bWHERE\b', sql_stripped, re.IGNORECASE):
+        tok = m.group()
+        if tok == '(':
+            depth += 1
+        elif tok == ')':
+            depth -= 1
+        elif depth == 0:  # WHERE at outermost level
+            has_outer_where = True
+            break
+
+    if has_outer_where:
         return sql_stripped + f"\n  AND {combined}"
     return sql_stripped + f"\nWHERE {combined}"
 
@@ -757,19 +1077,6 @@ class SQLAgent:
 
     # ── Stage 2: PQL → SQL ──────────────────────────────────────────────────
 
-    def _generate_cases_query(self, cases_name: str) -> str:
-        """Route to the cases table (Tier 1 — exact ARIS values)."""
-        safe = cases_name.replace("'", "''")
-        return (
-            f"-- PQL Tier 1: pre-aggregated ARIS value from cases table\n"
-            f"SELECT\n"
-            f"  name  AS kpi_name,\n"
-            f"  value AS kpi_value\n"
-            f"FROM cases\n"
-            f"WHERE name = '{safe}'\n"
-            f"LIMIT 1"
-        )
-
     def _generate_computed_query(
         self,
         kpi_name:    str,
@@ -778,20 +1085,37 @@ class SQLAgent:
         city_cond:   str,
     ) -> str:
         """
-        Route to Tier 2 — translate PQL to SQL for computed KPIs.
+        Translate PQL to SQL for a computed KPI.
 
         Uses KPI_METADATA for the PQL expression, aggregation type,
         and source tables.  Applies date/city filters where applicable.
         """
+        # ── ARIS cases table shortcut ─────────────────────────────────────────
+        # For the 13 ARIS dashboard KPIs, query the pre-aggregated `cases` table
+        # directly.  This guarantees exact ARIS values regardless of how the raw
+        # supply-chain data is distributed.
+        if kpi_name in CASES_TABLE_KPI_MAP:
+            cases_name, label = CASES_TABLE_KPI_MAP[kpi_name]
+            # Escape single quotes in the name (defensive)
+            safe_name = cases_name.replace("'", "''")
+            return (
+                f"-- ARIS Dashboard KPI — {kpi_name}\n"
+                f"SELECT value AS {label}\n"
+                f"FROM cases\n"
+                f"WHERE name = '{safe_name}'"
+            )
+
         # Special case: full custom FROM clause provided
         if "pql_override" in meta and "from" in meta:
-            sql = f"-- PQL Tier 2: computed KPI — {kpi_name}\nSELECT\n  {meta['pql_override']}\n{meta['from']}"
-            return _add_filters_to_sql(sql, period_cond, city_cond)
+            # Respect no_date_filter flag — skip year filter for KPIs whose tables
+            # lack Warehouse_Record_Date (single-sheet, warehouse-assignment, etc.)
+            effective_period = "" if meta.get("no_date_filter") else period_cond
+            sql = f"-- Computed KPI — {kpi_name}\nSELECT\n  {meta['pql_override']}\n{meta['from']}"
+            return _add_filters_to_sql(sql, effective_period, city_cond)
 
         # Standard PQL translation
         pql_expr   = meta.get("pql") or self.kpi_defs.get_pql(kpi_name) or ""
         agg        = meta.get("agg", "SUM")
-        tables     = meta.get("tables", [])
         label      = meta.get("label", "result")
 
         if not pql_expr:
@@ -799,6 +1123,13 @@ class SQLAgent:
                 f"No PQL logic found for KPI '{kpi_name}'. "
                 f"Add it to KPI_METADATA or kpi_definitions.csv."
             )
+
+        # Merge explicit tables with auto-detected ones from PQL
+        # (ARIS_COL_TABLE_DEPS may add Delivery_Dim / Sales Order DIM that
+        #  aren't listed in meta["tables"] but are needed for column remaps)
+        explicit_tables = meta.get("tables", [])
+        detected_tables = self.pql.detect_source_tables(pql_expr)
+        tables = explicit_tables + [t for t in detected_tables if t not in explicit_tables]
 
         # Translate PQL and build SELECT
         sql_expr            = self.pql.translate_expr(pql_expr)
@@ -819,13 +1150,16 @@ class SQLAgent:
             select_expr = f"{sql_expr} AS {label}"
 
         parts = [
-            f"-- PQL Tier 2: computed KPI — {kpi_name}",
+            f"-- Computed KPI — {kpi_name}",
             "SELECT",
             f"  {select_expr}",
             from_clause,
         ]
 
-        where_parts = [p for p in [period_cond, city_cond] if p]
+        # Respect no_date_filter flag and pass through whatever period_cond was built
+        effective_period = "" if meta.get("no_date_filter") else period_cond
+
+        where_parts = [p for p in [effective_period, city_cond] if p]
         if where_parts:
             parts.append("WHERE " + "\n  AND ".join(where_parts))
 
@@ -858,20 +1192,18 @@ class SQLAgent:
                 f"Cannot identify KPI from: '{original_query}'.\n"
                 f"Supported KPIs: {', '.join(supported)}"
             )
+
+        # ── [KPI IDENTIFIED] ──────────────────────────────────────────────
+        _plog.kpi_identified(kpi_name, confidence)
         logger.info("KPI: '%s' (conf=%.2f)", kpi_name, confidence)
 
-        # ── Resolve canonical name (aliases) ─────────────────────────────
+        # ── Resolve KPI metadata ──────────────────────────────────────────
         meta = KPI_METADATA.get(kpi_name)
         if meta is None:
-            # Try to find via CASES_TABLE_MAP
-            if kpi_name in CASES_TABLE_MAP:
-                cases_name = CASES_TABLE_MAP[kpi_name]
-                meta = {"tier": "cases"}
-            else:
-                raise RuntimeError(
-                    f"KPI '{kpi_name}' not found in KPI_METADATA. "
-                    f"Add it to KPI_METADATA in sql_agent.py."
-                )
+            raise RuntimeError(
+                f"KPI '{kpi_name}' not found in KPI_METADATA. "
+                f"Add it to KPI_METADATA in sql_agent.py."
+            )
 
         # ── Build filter conditions ───────────────────────────────────────
         period     = intent.get('period')
@@ -879,38 +1211,27 @@ class SQLAgent:
         period_cond = _build_period_filter(period) if period else ""
         city_cond   = _build_city_filter(cities)   if cities  else ""
 
+        # ── Capture raw PQL from kpi_definitions.csv (before translation) ─
+        # Priority: pql_override (custom SELECT structure) > pql (row-level
+        # logic from CSV) > kpi_defs CSV fallback.
+        pql_expr = (
+            meta.get("pql_override")
+            or meta.get("pql")
+            or self.kpi_defs.get_pql(kpi_name)
+            or ""
+        )
+
+        # ── [PQL FROM CSV] ────────────────────────────────────────────────
+        _plog.pql_from_csv(pql_expr, kpi_name)
+
+        # ── [PQL VALIDATED] ───────────────────────────────────────────────
+        _plog.pql_validated(kpi_name, self.kpi_defs, pql_expr)
+
         # ── Stage 2: PQL → SQL ────────────────────────────────────────────
-        tier = meta.get("tier", "computed")
+        sql = self._generate_computed_query(kpi_name, meta, period_cond, city_cond)
 
-        # Capture the PQL expression before translation for logging
-        if tier == "cases":
-            cases_name = meta.get("cases_name") or CASES_TABLE_MAP.get(kpi_name) or kpi_name
-            pql_expr = f'cases.name = \'{cases_name}\''  # synthetic PQL for pre-aggregated tier
-        else:
-            pql_expr = (
-                meta.get("pql_override")
-                or meta.get("pql")
-                or self.kpi_defs.get_pql(kpi_name)
-                or ""
-            )
-
-        # ── [PQL] ─────────────────────────────────────────────────────────
-        _plog.pql(pql_expr, kpi_name)
-
-        # ── [PQL VALID] ───────────────────────────────────────────────────
-        _plog.pql_validation(kpi_name, self.kpi_defs, pql_expr)
-
-        # ── Generate SQL from PQL ─────────────────────────────────────────
-        if tier == "cases":
-            sql = self._generate_cases_query(cases_name)
-            # Note: cases table filters are not applicable (pre-aggregated)
-            if period_cond:
-                sql += f"\n-- Note: period filter '{period}' not applied — value is pre-aggregated"
-        else:
-            sql = self._generate_computed_query(kpi_name, meta, period_cond, city_cond)
-
-        # ── [SQL] ─────────────────────────────────────────────────────────
-        _plog.sql(sql)
+        # ── [SQL GENERATED] ──────────────────────────────────────────────
+        _plog.sql_generated(sql)
 
         logger.info("Generated SQL:\n%s", sql)
         return sql
